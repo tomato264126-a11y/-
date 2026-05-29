@@ -99,7 +99,7 @@
     <h1>タピオカゲーム</h1>
     <div class="rule-summary">
         全部のタピオカを「＋（水色）」にしよう！<br>
-        「－」がごつんとぶつかると、符号がパチッとひっくり返るよ！
+        「－」をぶつけると、くっついている「－」がまとめて「＋」に大連鎖するよ！
     </div>
 
     <div id="game-container">
@@ -122,7 +122,7 @@
     </div>
 
 <script>
-const { Engine, Render, Runner, Bodies, Composite, Body, Events } = Matter;
+const { Engine, Render, Runner, Bodies, Composite, Body, Events, Pair } = Matter;
 
 const container = document.getElementById('game-container');
 const timerEl = document.getElementById('timer');
@@ -138,12 +138,10 @@ let gameActive = false;
 let startTime = null;
 let timerInterval = null;
 
-// オーディオ設定
 let audioCtx = null;
 let isMuted = false;
 let bgmInterval = null;
 
-// 定数
 const WIDTH = 360;
 const HEIGHT = 540;
 const TAPI_RADIUS = 40; 
@@ -217,13 +215,11 @@ function initGame() {
     runner = Runner.create();
     Runner.run(runner, engine);
 
-    // コップの壁
     const leftWall = Bodies.rectangle(CUP_X - CUP_W/2, CUP_Y - CUP_H/2, WALL_THICK, CUP_H, { isStatic: true, render: { fillStyle: '#cfd8dc' } });
     const rightWall = Bodies.rectangle(CUP_X + CUP_W/2, CUP_Y - CUP_H/2, WALL_THICK, CUP_H, { isStatic: true, render: { fillStyle: '#cfd8dc' } });
     const bottomWall = Bodies.rectangle(CUP_X, CUP_Y, CUP_W + WALL_THICK, WALL_THICK, { isStatic: true, render: { fillStyle: '#cfd8dc' } });
     Composite.add(engine.world, [leftWall, rightWall, bottomWall]);
 
-    // 初期タピオカの安全配置（絶対外に飛び出さない位置）
     const spawnPositions = [
         { x: CUP_X - 70, y: CUP_Y - TAPI_RADIUS - 15 },
         { x: CUP_X,      y: CUP_Y - TAPI_RADIUS - 15 },
@@ -248,7 +244,6 @@ function initGame() {
         ctx.setLineDash([]);
     });
 
-    // 衝突の瞬間（Start）だけをとらえる
     Events.on(engine, 'collisionStart', handleCollisions);
     Events.on(engine, 'afterUpdate', updateLabels);
 
@@ -270,7 +265,7 @@ function initGame() {
 function createTapioca(x, y, sign, isStatic = false) {
     const body = Bodies.circle(x, y, TAPI_RADIUS, {
         isStatic: isStatic,
-        restitution: 0.2, // 少しだけぷるんと弾む
+        restitution: 0.2, 
         friction: 0.02,
         render: { visible: false }
     });
@@ -349,43 +344,94 @@ function updateLabels() {
     });
 }
 
-// 【原点回帰】「ぶつかった瞬間」だけパチッと1回変化する究極シンプルロジック
+// 【大改良】つながっているマイナスを一網打尽にする連鎖処理システム
 function handleCollisions(event) {
     if (!gameActive) return;
     
-    let affectedIds = new Set();
+    let triggerChain = false;
     
+    // 今回の衝突で「マイナス同士」または「マイナスとプラス」が衝突したか確認
     event.pairs.forEach(pair => {
         const bodyA = pair.bodyA;
         const bodyB = pair.bodyB;
         
-        // 双方がコップ内に着地しているタピオカの場合のみ判定
         if (bodyA.plugin && bodyB.plugin && bodyA.plugin.hasLanded && bodyB.plugin.hasLanded) {
-            
-            // 片方がマイナスなら、もう片方の符号を反転させる（＋→－、－→＋）
-            if (bodyA.plugin.sign === '－' && !affectedIds.has(bodyB.plugin.id)) {
-                bodyB.plugin.sign = (bodyB.plugin.sign === '＋') ? '－' : '＋';
-                affectedIds.add(bodyB.plugin.id);
-            }
-            else if (bodyB.plugin.sign === '－' && !affectedIds.has(bodyA.plugin.id)) {
-                bodyA.plugin.sign = (bodyA.plugin.sign === '＋') ? '－' : '＋';
-                affectedIds.add(bodyA.plugin.id);
+            // どちらか一方でもマイナスが含まれる衝突が起きたら、連鎖の引き金にする
+            if (bodyA.plugin.sign === '－' || bodyB.plugin.sign === '－') {
+                triggerChain = true;
             }
         }
     });
     
-    // 変化があったタピオカの見た目を一括更新
-    if (affectedIds.size > 0) {
-        playSound(587.33, 'sine', 0.08); 
-        list.forEach(item => {
-            if (affectedIds.has(item.body.plugin.id)) {
-                item.label.className = `tapioca-label ${item.body.plugin.sign === '＋' ? 'plus' : 'minus'}`;
-                item.label.innerText = item.body.plugin.sign;
+    // 連鎖の引き金が引かれたら、現在「接触しているグループ」をすべて解析する
+    if (triggerChain) {
+        // 現在世界に存在するすべての接触ペアを取得
+        const allPairs = engine.pairs.list;
+        
+        // 各タピオカが「現在誰と接触しているか」の繋がりマップ（隣接リスト）を作る
+        let graph = {};
+        list.forEach(item => { graph[item.body.plugin.id] = []; });
+        
+        allPairs.forEach(pair => {
+            if (pair.bodyA.plugin && pair.bodyB.plugin) {
+                const idA = pair.bodyA.plugin.id;
+                const idB = pair.bodyB.plugin.id;
+                if (graph[idA] && graph[idB]) {
+                    graph[idA].push(pair.bodyB);
+                    graph[idB].push(pair.bodyA);
+                }
             }
         });
-        
-        // 連鎖的に変わる可能性があるので、少し遅らせてクリア判定
-        setTimeout(checkClear, 200);
+
+        // 変化させるべきIDを記録するセット
+        let flippedIds = new Set();
+        let visited = new Set();
+
+        // 探索アルゴリズム（くっついているマイナスを芋づる式に見つける）
+        function dfs(body, shouldFlipNext) {
+            if (visited.has(body.plugin.id)) return;
+            visited.add(body.plugin.id);
+
+            let currentSign = body.plugin.sign;
+            // 前のタピオカがマイナスで、自分にエネルギーが回ってきたらひっくり返す
+            if (shouldFlipNext) {
+                body.plugin.newSign = (currentSign === '＋') ? '－' : '＋';
+                flippedIds.add(body.plugin.id);
+            } else {
+                body.plugin.newSign = currentSign;
+            }
+
+            // 隣接する（くっついている）タピオカへエネルギーを伝播
+            let neighbors = graph[body.plugin.id] || [];
+            neighbors.forEach(neighbor => {
+                // 自分が「元々マイナス」だった場合、隣のやつをひっくり返すエネルギー（連鎖）が発生する
+                let nextFlip = (currentSign === '－');
+                dfs(neighbor, nextFlip);
+            });
+        }
+
+        // すべてのタピオカから探索を開始
+        list.forEach(item => {
+            if (!visited.has(item.body.plugin.id)) {
+                dfs(item.body, false);
+            }
+        });
+
+        // 実際に符号を更新して画面に反映
+        if (flippedIds.size > 0) {
+            playSound(587.33, 'sine', 0.08); 
+            list.forEach(item => {
+                if (item.body.plugin.newSign) {
+                    item.body.plugin.sign = item.body.plugin.newSign;
+                    item.label.className = `tapioca-label ${item.body.plugin.sign === '＋' ? 'plus' : 'minus'}`;
+                    item.label.innerText = item.body.plugin.sign;
+                    delete item.body.plugin.newSign;
+                }
+            });
+            
+            // 連鎖演出が落ち着いた頃にクリアチェック
+            setTimeout(checkClear, 300);
+        }
     }
 }
 
