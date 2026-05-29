@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>タピオカゲーム</title>
+    <title>タピオカパズル</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body {
@@ -15,7 +15,7 @@
             user-select: none;
         }
         h1 { color: #333; margin-bottom: 5px; font-size: 24px; }
-        .rule-summary { font-size: 15px; color: #2c3e50; margin-bottom: 15px; line-height: 1.5; font-weight: bold; }
+        .rule-summary { font-size: 14px; color: #2c3e50; margin-bottom: 15px; line-height: 1.5; font-weight: bold; }
         #game-container {
             position: relative;
             width: 360px;
@@ -54,10 +54,10 @@
         
         #ui-layer {
             margin-top: 15px;
-            font-size: 18px;
+            font-size: 20px;
             font-weight: bold;
         }
-        #timer { color: #2c3e50; }
+        #score { color: #e91e63; font-size: 24px; }
         
         .modal {
             display: none;
@@ -71,72 +71,68 @@
             border-radius: 20px;
             z-index: 10;
         }
-        #gameover-modal { background-color: rgba(139, 0, 0, 0.85); }
+        #gameover-modal { background-color: rgba(44, 62, 80, 0.9); }
         
         button {
-            margin-top: 10px;
-            padding: 10px 20px;
+            margin-top: 15px;
+            padding: 10px 25px;
             font-size: 16px;
             font-weight: bold;
             border: none;
             border-radius: 5px;
-            background-color: #4caf50;
+            background-color: #e91e63;
             color: white;
             cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
         }
-        button:hover { background-color: #45a049; }
+        button:hover { background-color: #c2185b; }
         .sub-btn {
             background-color: #78909c;
             font-size: 14px;
             padding: 6px 12px;
             margin: 5px;
+            box-shadow: none;
         }
         #reset-btn { background-color: #ff9800; }
     </style>
 </head>
 <body>
 
-    <h1>タピオカゲーム</h1>
+    <h1>タピオカパズル</h1>
     <div class="rule-summary">
-        全部のタピオカを「＋（水色）」にしよう！<br>
-        「－」をぶつけると、ぶつけた側もぶつかった側も一緒に「＋」にひっくり返るよ！
+        赤い線をこえるまでに「＋（水色）」をたくさん作ろう！<br>
+        「－」が直接ごつんと触れあったタピオカ同士だけが反転するよ！
     </div>
 
     <div id="game-container">
-        <div id="clear-modal" class="modal">
-            <h2>🎉 CLEAR !!</h2>
-            <p id="final-time"></p>
-            <button onclick="resetGame()">もう一度遊ぶ</button>
-        </div>
         <div id="gameover-modal" class="modal">
-            <h2>⚠️ GAME OVER</h2>
-            <p>コップから溢れてしまった！</p>
-            <button onclick="resetGame()">リトライ</button>
+            <h2>📊 GAME OVER</h2>
+            <p>コップからタピオカが溢れました！</p>
+            <p style="font-size: 24px; font-weight: bold; color: #ffeb3b;" id="final-score"></p>
+            <button onclick="resetGame()">もう一度挑戦する</button>
         </div>
     </div>
 
     <div id="ui-layer">
-        タイム: <span id="timer">0.0</span> 秒<br>
+        現在のスコア: <span id="score">0</span> 点<br>
         <button class="sub-btn" id="sound-btn" onclick="toggleMute()">🎵 BGM: ON</button>
-        <button class="sub-btn" id="reset-btn" onclick="resetGame()">🔄 最初からリセット</button>
+        <button class="sub-btn" id="reset-btn" onclick="resetGame()">🔄 スコアをリセット</button>
     </div>
 
 <script>
 const { Engine, Render, Runner, Bodies, Composite, Body, Events } = Matter;
 
 const container = document.getElementById('game-container');
-const timerEl = document.getElementById('timer');
-const clearModal = document.getElementById('clear-modal');
+const scoreEl = document.getElementById('score');
 const gameoverModal = document.getElementById('gameover-modal');
-const finalTimeEl = document.getElementById('final-time');
+const finalScoreEl = document.getElementById('final-score');
 
 let engine, render, runner;
 let currentBody = null;
 let currentLabel = null;
 let list = []; 
 let gameActive = false;
-let startTime = null;
-let timerInterval = null;
+let score = 0;
 
 let audioCtx = null;
 let isMuted = false;
@@ -199,11 +195,12 @@ function initGame() {
     if (oldCanvas) oldCanvas.remove();
     document.querySelectorAll('.tapioca-label').forEach(el => el.remove());
     
-    clearModal.style.display = 'none';
     gameoverModal.style.display = 'none';
     list = [];
     currentBody = null;
     currentLabel = null;
+    score = 0;
+    scoreEl.innerText = score;
 
     engine = Engine.create({ gravity: { y: 1.4 } });
     render = Render.create({
@@ -226,16 +223,15 @@ function initGame() {
         { x: CUP_X + 70, y: CUP_Y - TAPI_RADIUS - 15 }
     ];
 
-    // 初期配置：今回は「マイナスが1つ確実に出る」ように調整してテストしやすく
     for (let i = 0; i < 3; i++) {
-        let sign = (i === 1) ? '－' : '＋'; // 中央を確実にマイナスに
+        let sign = Math.random() > 0.5 ? '－' : '＋';
         createTapioca(spawnPositions[i].x, spawnPositions[i].y, sign, false);
     }
 
     Events.on(render, 'afterRender', () => {
         const ctx = render.context;
-        ctx.strokeStyle = 'rgba(255, 0, 0, 0.4)';
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = 'rgba(255, 0, 0, 0.6)';
+        ctx.lineWidth = 3;
         ctx.setLineDash([5, 5]);
         ctx.beginPath();
         ctx.moveTo(CUP_X - CUP_W/2, DEADLINE_Y);
@@ -244,14 +240,11 @@ function initGame() {
         ctx.setLineDash([]);
     });
 
+    // 衝突の「瞬間」だけをシンプルに捉える
     Events.on(engine, 'collisionStart', handleCollisions);
     Events.on(engine, 'afterUpdate', updateLabels);
 
     gameActive = true;
-    startTime = Date.now();
-    clearInterval(timerInterval);
-    timerInterval = setInterval(updateTimer, 100);
-
     spawnNext();
 
     container.addEventListener('touchstart', handleTouch, {passive: false});
@@ -279,7 +272,14 @@ function createTapioca(x, y, sign, isStatic = false) {
     Composite.add(engine.world, body);
     
     const item = { body, label };
-    if (!isStatic) list.push(item);
+    if (!isStatic) {
+        list.push(item);
+        // 最初から「＋」が生成された場合も加点
+        if (sign === '＋') {
+            score += 10;
+            scoreEl.innerText = score;
+        }
+    }
     
     label.style.left = `${x}px`;
     label.style.top = `${y}px`;
@@ -289,8 +289,7 @@ function createTapioca(x, y, sign, isStatic = false) {
 
 function spawnNext() {
     if (!gameActive) return;
-    // テストしやすいよう、次のタピオカも適度にマイナスが出るように調整
-    const sign = Math.random() > 0.5 ? '－' : '＋';
+    const sign = Math.random() > 0.45 ? '－' : '＋';
     const next = createTapioca(WIDTH / 2, 50, sign, true);
     currentBody = next.body;
     currentLabel = next.label;
@@ -315,10 +314,14 @@ function dropCurrent() {
     if (!currentBody || !gameActive) return;
     initAudio();
     
-    // 【最重要修正】落とした瞬間に静的フラグを解除し、即座に判定用リスト（list）へ追加！！
-    // これにより、落ちてきたタピオカ自身も衝突時に一緒にひっくり返る対象になります。
+    // 落とした瞬間、すぐリストに加えて衝突時にお互いが判定されるようにする
     Body.setStatic(currentBody, false);
     list.push({ body: currentBody, label: currentLabel });
+    
+    if (currentBody.plugin.sign === '＋') {
+        score += 10;
+        scoreEl.innerText = score;
+    }
     
     playSound(440, 'square', 0.05);
     currentBody = null;
@@ -346,109 +349,74 @@ function updateLabels() {
     });
 }
 
-// 衝突時にすべてのタピオカを平等に判定する改良型連鎖システム
+// 【究極洗練】直接ごつんと当たったペア「だけ」を双方変化させるシステム
 function handleCollisions(event) {
     if (!gameActive) return;
     
-    let triggerChain = false;
+    let changedIds = new Set();
     
     event.pairs.forEach(pair => {
         const bodyA = pair.bodyA;
         const bodyB = pair.bodyB;
         
+        // タピオカ同士の直接の衝突である場合のみ
         if (bodyA.plugin && bodyB.plugin) {
-            if (bodyA.plugin.sign === '－' || bodyB.plugin.sign === '－') {
-                triggerChain = true;
+            let signA = bodyA.plugin.sign;
+            let signB = bodyB.plugin.sign;
+            
+            // どちらか一方にマイナスが含まれている場合、お互いの符号を掛け合わせる(双方反転)
+            if (signA === '－' || signB === '－') {
+                // すでに今回のフレームで処理済みのペアでなければ処理
+                if (!changedIds.has(bodyA.plugin.id) && !changedIds.has(bodyB.plugin.id)) {
+                    
+                    // 新しい符号の決定（マイナスをかける＝符号反転）
+                    bodyA.plugin.nextSign = (signA === '＋') ? '－' : '＋';
+                    bodyB.plugin.nextSign = (signB === '＋') ? '－' : '＋';
+                    
+                    changedIds.add(bodyA.plugin.id);
+                    changedIds.add(bodyB.plugin.id);
+                }
             }
         }
     });
     
-    if (triggerChain) {
-        const allPairs = engine.pairs.list;
+    // 実際に直接当たったペアだけをパチッとひっくり返す
+    if (changedIds.size > 0) {
+        playSound(587.33, 'sine', 0.08); 
         
-        let graph = {};
-        list.forEach(item => { graph[item.body.plugin.id] = []; });
-        
-        allPairs.forEach(pair => {
-            if (pair.bodyA.plugin && pair.bodyB.plugin) {
-                const idA = pair.bodyA.plugin.id;
-                const idB = pair.bodyB.plugin.id;
-                if (graph[idA] && graph[idB]) {
-                    graph[idA].push(pair.bodyB);
-                    graph[idB].push(pair.bodyA);
-                }
-            }
-        });
-
-        let flippedIds = new Set();
-        let visited = new Set();
-
-        function dfs(body, shouldFlipNext) {
-            if (visited.has(body.plugin.id)) return;
-            visited.add(body.plugin.id);
-
-            let currentSign = body.plugin.sign;
-            if (shouldFlipNext) {
-                body.plugin.newSign = (currentSign === '＋') ? '－' : '＋';
-                flippedIds.add(body.plugin.id);
-            } else {
-                body.plugin.newSign = currentSign;
-            }
-
-            let neighbors = graph[body.plugin.id] || [];
-            neighbors.forEach(neighbor => {
-                let nextFlip = (currentSign === '－');
-                dfs(neighbor, nextFlip);
-            });
-        }
-
         list.forEach(item => {
-            if (!visited.has(item.body.plugin.id)) {
-                dfs(item.body, false);
+            if (item.body.plugin.nextSign) {
+                let oldSign = item.body.plugin.sign;
+                let newSign = item.body.plugin.nextSign;
+                
+                item.body.plugin.sign = newSign;
+                item.label.className = `tapioca-label ${newSign === '＋' ? 'plus' : 'minus'}`;
+                item.label.innerText = newSign;
+                delete item.body.plugin.nextSign;
+                
+                // マイナスから新しく「＋」に変わった瞬間にボーナス10点加算！
+                if (oldSign === '－' && newSign === '＋') {
+                    score += 10;
+                }
+                // もしプラスからマイナスにデバフを喰らってしまったら-10点
+                else if (oldSign === '＋' && newSign === '－') {
+                    score = Math.max(0, score - 10);
+                }
             }
         });
-
-        if (flippedIds.size > 0) {
-            playSound(587.33, 'sine', 0.08); 
-            list.forEach(item => {
-                if (item.body.plugin.newSign) {
-                    item.body.plugin.sign = item.body.plugin.newSign;
-                    item.label.className = `tapioca-label ${item.body.plugin.sign === '＋' ? 'plus' : 'minus'}`;
-                    item.label.innerText = item.body.plugin.sign;
-                    delete item.body.plugin.newSign;
-                }
-            });
-            
-            setTimeout(checkClear, 300);
-        }
-    }
-}
-
-function updateTimer() {
-    let elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    timerEl.innerText = elapsed;
-}
-
-function checkClear() {
-    if (list.length === 0) return;
-    const allPlus = list.every(item => item.body.plugin.sign === '＋');
-    if (allPlus) {
-        gameActive = false;
-        clearInterval(timerInterval);
-        playSound(880, 'sine', 0.1);
-        setTimeout(() => playSound(1318.51, 'sine', 0.3), 100);
-        clearModal.style.display = 'flex';
-        finalTimeEl.innerText = `タイム: ${timerEl.innerText} 秒`;
+        
+        scoreEl.innerText = score;
     }
 }
 
 function checkGameOver() {
+    // 動きがほぼ止まっているタピオカが、赤い線（DEADLINE_Y）より上にいたらアウト
     let overflow = list.some(item => item.body.position.y < DEADLINE_Y && item.body.velocity.y < 0.1);
     if (overflow) {
         gameActive = false;
-        clearInterval(timerInterval);
         playSound(150, 'sawtooth', 0.5);
         gameoverModal.style.display = 'flex';
+        finalScoreEl.innerText = `あなたの記録: ${score} 点`;
     }
 }
 
