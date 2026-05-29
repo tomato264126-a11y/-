@@ -347,14 +347,14 @@ function updateLabels() {
     });
 }
 
-// 【正負の数・掛け算完全準拠ルール】
+// 【バグ完全修正】時間差をなくし、最初の状態をスナップショットして一斉に掛け算判定する
 function handleCollisions(event) {
     if (!gameActive) return;
     
     let involvedBodies = new Set();
     let hasDropper = false;
 
-    // 1. 同一フレーム内で、落としたタピオカが関わっている衝突ボディをすべて集める
+    // 1. このフレームで落下タピオカと衝突した全オブジェクトを抽出
     event.pairs.forEach(pair => {
         const bodyA = pair.bodyA;
         const bodyB = pair.bodyB;
@@ -368,28 +368,32 @@ function handleCollisions(event) {
         }
     });
     
-    // 落下タピオカの衝突が検知されなければ何もしない
     if (!hasDropper || involvedBodies.size === 0) return;
 
-    // 2. 衝突した塊の中に「－」が何個あるかカウントする
+    // 🌟【最重要修正】激突したその瞬間の符号状態を最初に完全固定（スナップショット）する
+    let snapshot = [];
     let minusCount = 0;
+    
     involvedBodies.forEach(body => {
-        if (body.plugin.sign === '－') {
+        const currentSign = body.plugin.sign;
+        snapshot.push({ body: body, initialSign: currentSign });
+        if (currentSign === '－') {
             minusCount++;
         }
     });
 
-    // 3. 【正負の法則】マイナスが奇数個なら全員「－」、偶数個なら全員「＋」
+    // 2. 固定された最初の状態から、掛け算の結果（奇数個なら「－」、偶数個なら「＋」）を決定
     let newSign = (minusCount % 2 === 1) ? '－' : '＋';
 
+    // 3. 全員同時に、決定した新しい符号へと一斉に書き換える
     let updated = false;
-    involvedBodies.forEach(body => {
-        const item = list.find(t => t.body.plugin.id === body.plugin.id);
-        if (item) {
-            let oldSign = item.body.plugin.sign;
-            
-            // 符号が変わる場合のみ適用
-            if (oldSign !== newSign) {
+    snapshot.forEach(itemData => {
+        const targetBody = itemData.body;
+        const oldSign = itemData.initialSign; // 変化前の最初の符号を使うので、入れ替わりバグは起きない
+        
+        if (oldSign !== newSign) {
+            const item = list.find(t => t.body.plugin.id === targetBody.plugin.id);
+            if (item) {
                 item.body.plugin.sign = newSign;
                 item.label.className = `tapioca-label ${newSign === '＋' ? 'plus' : 'minus'}`;
                 item.label.innerText = newSign;
@@ -405,7 +409,7 @@ function handleCollisions(event) {
         }
     });
 
-    // 4. 最初の激突フレームの判定が終わったので、落下主役フラグを一斉解除
+    // 4. 全員分の落下フラグを安全に解除
     involvedBodies.forEach(body => {
         if (body.plugin.isDropping) {
             body.plugin.isDropping = false;
