@@ -47,7 +47,7 @@
             pointer-events: none;
             z-index: 2;
             transform: translate(-50%, -50%);
-            transition: background-color 0.2s, transform 0.1s;
+            transition: background-color 0.15s, transform 0.05s;
         }
         .plus { background-color: #4fc3f7; }
         .minus { background-color: #ff8a80; }
@@ -99,8 +99,7 @@
     <h1>タピオカゲーム</h1>
     <div class="rule-summary">
         全部のタピオカを「＋（水色）」にしよう！<br>
-        <strong>「－」をぶつけると、相手の符号がひっくり返るよ！</strong><br>
-        （マイナス × マイナス ＝ プラスの大反転を狙おう！）
+        「－」がぶつかったり、押されて隣と新しく触れると符号がひっくり返るよ！
     </div>
 
     <div id="game-container">
@@ -139,21 +138,10 @@ let gameActive = false;
 let startTime = null;
 let timerInterval = null;
 
-// オーディオ設定
+// オーディオメモリ解放対策
 let audioCtx = null;
 let isMuted = false;
 let bgmInterval = null;
-
-// 定数
-const WIDTH = 360;
-const HEIGHT = 540;
-const TAPI_RADIUS = 40; 
-const CUP_X = WIDTH / 2;
-const CUP_Y = HEIGHT - 15;
-const CUP_W = 280;
-const CUP_H = 340;
-const WALL_THICK = 12;
-const DEADLINE_Y = HEIGHT - CUP_H + 20; 
 
 function initAudio() {
     if (!audioCtx) {
@@ -162,6 +150,7 @@ function initAudio() {
     }
 }
 
+// サウンドのメモリリークを完全に防ぐ修正版
 function playSound(freq, type, duration) {
     if (isMuted || !audioCtx) return;
     try {
@@ -169,12 +158,20 @@ function playSound(freq, type, duration) {
         let gain = audioCtx.createGain();
         osc.type = type;
         osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-        gain.gain.setValueAtTime(0.06, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+        gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+        
         osc.connect(gain);
         gain.connect(audioCtx.destination);
+        
         osc.start();
         osc.stop(audioCtx.currentTime + duration);
+
+        // 再生終了時に自動で接続を切断してメモリを解放
+        osc.onended = () => {
+            osc.disconnect();
+            gain.disconnect();
+        };
     } catch(e) {}
 }
 
@@ -184,7 +181,7 @@ function startBGM() {
     let step = 0;
     bgmInterval = setInterval(() => {
         if (gameActive && !isMuted) {
-            playSound(notes[step % notes.length], 'triangle', 0.2);
+            playSound(notes[step % notes.length], 'triangle', 0.18);
             step++;
         }
     }, 400);
@@ -207,7 +204,7 @@ function initGame() {
     currentBody = null;
     currentLabel = null;
 
-    engine = Engine.create({ gravity: { y: 1.5 } });
+    engine = Engine.create({ gravity: { y: 1.4 } });
     render = Render.create({
         element: container,
         engine: engine,
@@ -217,16 +214,15 @@ function initGame() {
     runner = Runner.create();
     Runner.run(runner, engine);
 
-    // コップの壁
+    // コップ
     const leftWall = Bodies.rectangle(CUP_X - CUP_W/2, CUP_Y - CUP_H/2, WALL_THICK, CUP_H, { isStatic: true, render: { fillStyle: '#cfd8dc' } });
     const rightWall = Bodies.rectangle(CUP_X + CUP_W/2, CUP_Y - CUP_H/2, WALL_THICK, CUP_H, { isStatic: true, render: { fillStyle: '#cfd8dc' } });
     const bottomWall = Bodies.rectangle(CUP_X, CUP_Y, CUP_W + WALL_THICK, WALL_THICK, { isStatic: true, render: { fillStyle: '#cfd8dc' } });
     Composite.add(engine.world, [leftWall, rightWall, bottomWall]);
 
-    // 初期タピオカ（マイナスを少し出にくく調整して3個配置）
+    // 初期タピオカ
     for (let i = 0; i < 3; i++) {
         let sign = Math.random() > 0.65 ? '－' : '＋';
-        // 最低1個はマイナスを入れるおまけ
         if(i === 1 && !list.some(item => item.body.plugin.sign === '－')) sign = '－';
         
         let rx = CUP_X - 60 + (i * 60);
@@ -246,8 +242,9 @@ function initGame() {
         ctx.setLineDash([]);
     });
 
-    // 衝突イベント
+    // 反応を良くするため、StartとActiveの両方で判定を入れる
     Events.on(engine, 'collisionStart', handleCollisions);
+    Events.on(engine, 'collisionActive', handleCollisions);
     Events.on(engine, 'afterUpdate', updateLabels);
 
     gameActive = true;
@@ -265,11 +262,22 @@ function initGame() {
     container.addEventListener('mouseup', handleMouseUp);
 }
 
+// 定数
+const WIDTH = 360;
+const HEIGHT = 540;
+const TAPI_RADIUS = 40; 
+const CUP_X = WIDTH / 2;
+const CUP_Y = HEIGHT - 15;
+const CUP_W = 280;
+const CUP_H = 340;
+const WALL_THICK = 12;
+const DEADLINE_Y = HEIGHT - CUP_H + 20; 
+
 function createTapioca(x, y, sign, isStatic = false) {
     const body = Bodies.circle(x, y, TAPI_RADIUS, {
         isStatic: isStatic,
-        restitution: 0.15,
-        friction: 0.02,
+        restitution: 0.1,
+        friction: 0.01,
         render: { visible: false }
     });
     
@@ -278,21 +286,17 @@ function createTapioca(x, y, sign, isStatic = false) {
     label.innerText = sign;
     container.appendChild(label);
     
-    body.plugin = { sign: sign, hasLanded: !isStatic, id: Math.random() };
+    // coolDown: 連続で暴走変化するのを防ぐタイマー
+    body.plugin = { sign: sign, hasLanded: !isStatic, id: Math.random(), coolDown: 0 };
     Composite.add(engine.world, body);
     
     const item = { body, label };
     if (!isStatic) list.push(item);
-    
-    label.style.left = `${x}px`;
-    label.style.top = `${y}px`;
-    
     return item;
 }
 
 function spawnNext() {
     if (!gameActive) return;
-    // 落ちてくる弾は、マイナスが出やすいようにして戦略性をアップ
     const sign = Math.random() > 0.45 ? '－' : '＋';
     const next = createTapioca(WIDTH / 2, 50, sign, true);
     currentBody = next.body;
@@ -345,10 +349,12 @@ function updateLabels() {
         item.label.style.left = `${item.body.position.x}px`;
         item.label.style.top = `${item.body.position.y}px`;
         item.label.style.transform = `translate(-50%, -50%) rotate(${item.body.angle}rad)`;
+        // クールダウンタイマーを進める
+        if (item.body.plugin.coolDown > 0) item.body.plugin.coolDown--;
     });
 }
 
-// 新・衝突判定ルール（片方が「－」なら、ぶつかった相手の符号をひっくり返す！）
+// 敏感かつ安全に反応する新・衝突システム
 function handleCollisions(event) {
     if (!gameActive) return;
     
@@ -357,22 +363,29 @@ function handleCollisions(event) {
         const bodyB = pair.bodyB;
         
         if (bodyA.plugin && bodyB.plugin && bodyA.plugin.hasLanded && bodyB.plugin.hasLanded) {
+            // お互いがクールダウン中（変化直後）ならスキップして高速暴走を防ぐ
+            if (bodyA.plugin.coolDown > 0 || bodyB.plugin.coolDown > 0) return;
+
             let changed = false;
 
-            // bodyA が「－」だった場合、bodyB の符号を反転させる
-            if (bodyA.plugin.sign === '－') {
+            // 片方がマイナスだった場合、もう片方をひっくり返す
+            if (bodyA.plugin.sign === '－' && bodyB.plugin.sign !== '計算中') {
                 bodyB.plugin.sign = (bodyB.plugin.sign === '＋') ? '－' : '＋';
+                bodyA.plugin.coolDown = 15; // 約0.2秒間の連鎖待機時間を設定
+                bodyB.plugin.coolDown = 15;
                 changed = true;
             }
-            // bodyB が「－」だった場合、bodyA の符号を反転させる
-            else if (bodyB.plugin.sign === '－') {
+            else if (bodyB.plugin.sign === '－' && bodyA.plugin.sign !== '計算中') {
                 bodyA.plugin.sign = (bodyA.plugin.sign === '＋') ? '－' : '＋';
+                bodyA.plugin.coolDown = 15;
+                bodyB.plugin.coolDown = 15;
                 changed = true;
             }
             
             if (changed) {
-                playSound(600, 'sine', 0.1);
-                // ラベルの見た目を一括更新
+                playSound(587.33, 'sine', 0.08); // テンポの良い音
+                
+                // 画面表示をパッと更新
                 list.forEach(item => {
                     if (item.body.plugin.id === bodyA.plugin.id || item.body.plugin.id === bodyB.plugin.id) {
                         item.label.className = `tapioca-label ${item.body.plugin.sign === '＋' ? 'plus' : 'minus'}`;
