@@ -101,7 +101,7 @@
     <h1>タピオカパズル</h1>
     <div class="rule-summary">
         赤い線をこえるまでに「＋（水色）」をたくさん作ろう！<br>
-        落としたタピオカがぶつかった“その瞬間”だけ、触れたタピオカは一斉に反転するよ！
+        ぶつかったタピオカ全体の「－」が奇数個なら全てマイナス、偶数個なら全てプラスに！
     </div>
 
     <div id="game-container">
@@ -347,14 +347,14 @@ function updateLabels() {
     });
 }
 
-// 【挟み撃ち完全対応】同じフレームでぶつかった全タピオカを1つのグループとして一斉計算
+// 【正負の数・掛け算完全準拠ルール】
 function handleCollisions(event) {
     if (!gameActive) return;
     
     let involvedBodies = new Set();
     let hasDropper = false;
 
-    // 1. このフレームの衝突ペアから、落下タピオカが関わっているものを抽出
+    // 1. 同一フレーム内で、落としたタピオカが関わっている衝突ボディをすべて集める
     event.pairs.forEach(pair => {
         const bodyA = pair.bodyA;
         const bodyB = pair.bodyB;
@@ -368,30 +368,33 @@ function handleCollisions(event) {
         }
     });
     
-    // 落下中タピオカの衝突がないならスルー
+    // 落下タピオカの衝突が検知されなければ何もしない
     if (!hasDropper || involvedBodies.size === 0) return;
 
-    // 2. ぶつかったグループ全体の中に「－」が1つでも含まれるか判定
-    let hasMinus = false;
+    // 2. 衝突した塊の中に「－」が何個あるかカウントする
+    let minusCount = 0;
     involvedBodies.forEach(body => {
         if (body.plugin.sign === '－') {
-            hasMinus = true;
+            minusCount++;
         }
     });
 
-    // 3. 「－」が含まれるなら、グループの全員を反転（＋なら－に、－なら＋に）
+    // 3. 【正負の法則】マイナスが奇数個なら全員「－」、偶数個なら全員「＋」
+    let newSign = (minusCount % 2 === 1) ? '－' : '＋';
+
     let updated = false;
-    if (hasMinus) {
-        involvedBodies.forEach(body => {
-            const item = list.find(t => t.body.plugin.id === body.plugin.id);
-            if (item) {
-                let oldSign = item.body.plugin.sign;
-                let newSign = oldSign === '＋' ? '－' : '＋';
-                
+    involvedBodies.forEach(body => {
+        const item = list.find(t => t.body.plugin.id === body.plugin.id);
+        if (item) {
+            let oldSign = item.body.plugin.sign;
+            
+            // 符号が変わる場合のみ適用
+            if (oldSign !== newSign) {
                 item.body.plugin.sign = newSign;
                 item.label.className = `tapioca-label ${newSign === '＋' ? 'plus' : 'minus'}`;
                 item.label.innerText = newSign;
                 
+                // スコア計算
                 if (oldSign === '－' && newSign === '＋') {
                     score += 10;
                 } else if (oldSign === '＋' && newSign === '－') {
@@ -399,10 +402,10 @@ function handleCollisions(event) {
                 }
                 updated = true;
             }
-        });
-    }
+        }
+    });
 
-    // 4. 最初の衝撃が処理されたので、落下フラグを全員分確実に解除
+    // 4. 最初の激突フレームの判定が終わったので、落下主役フラグを一斉解除
     involvedBodies.forEach(body => {
         if (body.plugin.isDropping) {
             body.plugin.isDropping = false;
