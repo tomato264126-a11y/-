@@ -101,7 +101,7 @@
     <h1>タピオカパズル</h1>
     <div class="rule-summary">
         赤い線をこえるまでに「＋（水色）」をたくさん作ろう！<br>
-        落としたタピオカがぶつかった“その瞬間”だけ、触れた仲間が一斉に反転するよ！
+        落としたタピオカがぶつかった“その瞬間”だけ、触れたタピオカは一斉に反転するよ！
     </div>
 
     <div id="game-container">
@@ -347,46 +347,47 @@ function updateLabels() {
     });
 }
 
-// 【数学的完全版】落とした球の符号に関わらず、ぶつかった瞬間の掛け算を完全に再現
+// 【挟み撃ち完全対応】同じフレームでぶつかった全タピオカを1つのグループとして一斉計算
 function handleCollisions(event) {
     if (!gameActive) return;
     
-    let targetFlips = {};
-    let activeDroppers = new Set();
+    let involvedBodies = new Set();
+    let hasDropper = false;
 
+    // 1. このフレームの衝突ペアから、落下タピオカが関わっているものを抽出
     event.pairs.forEach(pair => {
         const bodyA = pair.bodyA;
         const bodyB = pair.bodyB;
         
         if (bodyA.plugin && bodyB.plugin) {
-            // どちらか一方が「上から落ちてきた主役タピオカ」である場合のみ判定
             if (bodyA.plugin.isDropping || bodyB.plugin.isDropping) {
-                
-                let signA = bodyA.plugin.sign;
-                let signB = bodyB.plugin.sign;
-                
-                // お互いの現在の符号を掛け合わせる（どちらか一方がマイナスなら、両方とも現在の逆の符号に反転する）
-                if (signA === '－' || signB === '－') {
-                    // targetFlipsに「この衝突によって最終的に上書きされるべき符号」を保存
-                    targetFlips[bodyA.plugin.id] = (targetFlips[bodyA.plugin.id] || bodyA.plugin.sign) === '＋' ? '－' : '＋';
-                    targetFlips[bodyB.plugin.id] = (targetFlips[bodyB.plugin.id] || bodyB.plugin.sign) === '＋' ? '－' : '＋';
-                }
-                
-                if (bodyA.plugin.isDropping) activeDroppers.add(bodyA);
-                if (bodyB.plugin.isDropping) activeDroppers.add(bodyB);
+                involvedBodies.add(bodyA);
+                involvedBodies.add(bodyB);
+                hasDropper = true;
             }
         }
     });
     
-    // 変化を画面とスコアに一斉適用
+    // 落下中タピオカの衝突がないならスルー
+    if (!hasDropper || involvedBodies.size === 0) return;
+
+    // 2. ぶつかったグループ全体の中に「－」が1つでも含まれるか判定
+    let hasMinus = false;
+    involvedBodies.forEach(body => {
+        if (body.plugin.sign === '－') {
+            hasMinus = true;
+        }
+    });
+
+    // 3. 「－」が含まれるなら、グループの全員を反転（＋なら－に、－なら＋に）
     let updated = false;
-    Object.keys(targetFlips).forEach(id => {
-        const item = list.find(t => t.body.plugin.id == id);
-        if (item) {
-            let oldSign = item.body.plugin.sign;
-            let newSign = targetFlips[id];
-            
-            if (oldSign !== newSign) {
+    if (hasMinus) {
+        involvedBodies.forEach(body => {
+            const item = list.find(t => t.body.plugin.id === body.plugin.id);
+            if (item) {
+                let oldSign = item.body.plugin.sign;
+                let newSign = oldSign === '＋' ? '－' : '＋';
+                
                 item.body.plugin.sign = newSign;
                 item.label.className = `tapioca-label ${newSign === '＋' ? 'plus' : 'minus'}`;
                 item.label.innerText = newSign;
@@ -398,12 +399,14 @@ function handleCollisions(event) {
                 }
                 updated = true;
             }
-        }
-    });
+        });
+    }
 
-    // 最初の衝撃フレームが終了したため、落下主役フラグを速やかに解除
-    activeDroppers.forEach(body => {
-        body.plugin.isDropping = false;
+    // 4. 最初の衝撃が処理されたので、落下フラグを全員分確実に解除
+    involvedBodies.forEach(body => {
+        if (body.plugin.isDropping) {
+            body.plugin.isDropping = false;
+        }
     });
 
     if (updated) {
