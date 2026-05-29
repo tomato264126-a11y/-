@@ -267,7 +267,6 @@ function createTapioca(x, y, sign, isStatic = false) {
     label.innerText = sign;
     container.appendChild(label);
     
-    // isDropping: 最初から底にあるやつはfalse、落とすやつはtrueにする
     body.plugin = { sign: sign, id: Math.random(), isDropping: false };
     Composite.add(engine.world, body);
     
@@ -313,7 +312,6 @@ function dropCurrent() {
     if (!currentBody || !gameActive) return;
     initAudio();
     
-    // 落とした瞬間に「落下フラグ（isDropping）」をONにしてリストに追加
     Body.setStatic(currentBody, false);
     currentBody.plugin.isDropping = true;
     list.push({ body: currentBody, label: currentLabel });
@@ -349,7 +347,7 @@ function updateLabels() {
     });
 }
 
-// 【主役限定ロジック】落としたタピオカが激突した最初の瞬間だけを計算する
+// 【数学的完全版】落とした球の符号に関わらず、ぶつかった瞬間の掛け算を完全に再現
 function handleCollisions(event) {
     if (!gameActive) return;
     
@@ -361,26 +359,26 @@ function handleCollisions(event) {
         const bodyB = pair.bodyB;
         
         if (bodyA.plugin && bodyB.plugin) {
-            // どちらか一方が「今まさに上から落ちてきたタピオカ」である場合のみ処理！
+            // どちらか一方が「上から落ちてきた主役タピオカ」である場合のみ判定
             if (bodyA.plugin.isDropping || bodyB.plugin.isDropping) {
                 
                 let signA = bodyA.plugin.sign;
                 let signB = bodyB.plugin.sign;
                 
-                // どちらかにマイナスが含まれる場合、お互いの反転ターゲットをセット
+                // お互いの現在の符号を掛け合わせる（どちらか一方がマイナスなら、両方とも現在の逆の符号に反転する）
                 if (signA === '－' || signB === '－') {
+                    // targetFlipsに「この衝突によって最終的に上書きされるべき符号」を保存
                     targetFlips[bodyA.plugin.id] = (targetFlips[bodyA.plugin.id] || bodyA.plugin.sign) === '＋' ? '－' : '＋';
                     targetFlips[bodyB.plugin.id] = (targetFlips[bodyB.plugin.id] || bodyB.plugin.sign) === '＋' ? '－' : '＋';
                 }
                 
-                // 衝突した落下タピオカを記録
                 if (bodyA.plugin.isDropping) activeDroppers.add(bodyA);
                 if (bodyB.plugin.isDropping) activeDroppers.add(bodyB);
             }
         }
     });
     
-    // 反転をまとめて適用
+    // 変化を画面とスコアに一斉適用
     let updated = false;
     Object.keys(targetFlips).forEach(id => {
         const item = list.find(t => t.body.plugin.id == id);
@@ -403,7 +401,7 @@ function handleCollisions(event) {
         }
     });
 
-    // 【重要】最初の激突が終わったので、このフレームで衝突した落下の主役たちのフラグを速攻で解除！
+    // 最初の衝撃フレームが終了したため、落下主役フラグを速やかに解除
     activeDroppers.forEach(body => {
         body.plugin.isDropping = false;
     });
