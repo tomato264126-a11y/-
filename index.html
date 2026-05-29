@@ -99,7 +99,7 @@
     <h1>タピオカゲーム</h1>
     <div class="rule-summary">
         全部のタピオカを「＋（水色）」にしよう！<br>
-        「－」をぶつけると、くっついている「－」がまとめて「＋」に大連鎖するよ！
+        「－」をぶつけると、ぶつけた側もぶつかった側も一緒に「＋」にひっくり返るよ！
     </div>
 
     <div id="game-container">
@@ -122,7 +122,7 @@
     </div>
 
 <script>
-const { Engine, Render, Runner, Bodies, Composite, Body, Events, Pair } = Matter;
+const { Engine, Render, Runner, Bodies, Composite, Body, Events } = Matter;
 
 const container = document.getElementById('game-container');
 const timerEl = document.getElementById('timer');
@@ -226,9 +226,9 @@ function initGame() {
         { x: CUP_X + 70, y: CUP_Y - TAPI_RADIUS - 15 }
     ];
 
+    // 初期配置：今回は「マイナスが1つ確実に出る」ように調整してテストしやすく
     for (let i = 0; i < 3; i++) {
-        let sign = Math.random() > 0.65 ? '－' : '＋';
-        if(i === 1 && !list.some(item => item.body.plugin.sign === '－')) sign = '－';
+        let sign = (i === 1) ? '－' : '＋'; // 中央を確実にマイナスに
         createTapioca(spawnPositions[i].x, spawnPositions[i].y, sign, false);
     }
 
@@ -275,7 +275,7 @@ function createTapioca(x, y, sign, isStatic = false) {
     label.innerText = sign;
     container.appendChild(label);
     
-    body.plugin = { sign: sign, hasLanded: !isStatic, id: Math.random() };
+    body.plugin = { sign: sign, id: Math.random() };
     Composite.add(engine.world, body);
     
     const item = { body, label };
@@ -289,7 +289,8 @@ function createTapioca(x, y, sign, isStatic = false) {
 
 function spawnNext() {
     if (!gameActive) return;
-    const sign = Math.random() > 0.45 ? '－' : '＋';
+    // テストしやすいよう、次のタピオカも適度にマイナスが出るように調整
+    const sign = Math.random() > 0.5 ? '－' : '＋';
     const next = createTapioca(WIDTH / 2, 50, sign, true);
     currentBody = next.body;
     currentLabel = next.label;
@@ -314,8 +315,9 @@ function dropCurrent() {
     if (!currentBody || !gameActive) return;
     initAudio();
     
+    // 【最重要修正】落とした瞬間に静的フラグを解除し、即座に判定用リスト（list）へ追加！！
+    // これにより、落ちてきたタピオカ自身も衝突時に一緒にひっくり返る対象になります。
     Body.setStatic(currentBody, false);
-    currentBody.plugin.hasLanded = true;
     list.push({ body: currentBody, label: currentLabel });
     
     playSound(440, 'square', 0.05);
@@ -344,31 +346,26 @@ function updateLabels() {
     });
 }
 
-// 【大改良】つながっているマイナスを一網打尽にする連鎖処理システム
+// 衝突時にすべてのタピオカを平等に判定する改良型連鎖システム
 function handleCollisions(event) {
     if (!gameActive) return;
     
     let triggerChain = false;
     
-    // 今回の衝突で「マイナス同士」または「マイナスとプラス」が衝突したか確認
     event.pairs.forEach(pair => {
         const bodyA = pair.bodyA;
         const bodyB = pair.bodyB;
         
-        if (bodyA.plugin && bodyB.plugin && bodyA.plugin.hasLanded && bodyB.plugin.hasLanded) {
-            // どちらか一方でもマイナスが含まれる衝突が起きたら、連鎖の引き金にする
+        if (bodyA.plugin && bodyB.plugin) {
             if (bodyA.plugin.sign === '－' || bodyB.plugin.sign === '－') {
                 triggerChain = true;
             }
         }
     });
     
-    // 連鎖の引き金が引かれたら、現在「接触しているグループ」をすべて解析する
     if (triggerChain) {
-        // 現在世界に存在するすべての接触ペアを取得
         const allPairs = engine.pairs.list;
         
-        // 各タピオカが「現在誰と接触しているか」の繋がりマップ（隣接リスト）を作る
         let graph = {};
         list.forEach(item => { graph[item.body.plugin.id] = []; });
         
@@ -383,17 +380,14 @@ function handleCollisions(event) {
             }
         });
 
-        // 変化させるべきIDを記録するセット
         let flippedIds = new Set();
         let visited = new Set();
 
-        // 探索アルゴリズム（くっついているマイナスを芋づる式に見つける）
         function dfs(body, shouldFlipNext) {
             if (visited.has(body.plugin.id)) return;
             visited.add(body.plugin.id);
 
             let currentSign = body.plugin.sign;
-            // 前のタピオカがマイナスで、自分にエネルギーが回ってきたらひっくり返す
             if (shouldFlipNext) {
                 body.plugin.newSign = (currentSign === '＋') ? '－' : '＋';
                 flippedIds.add(body.plugin.id);
@@ -401,23 +395,19 @@ function handleCollisions(event) {
                 body.plugin.newSign = currentSign;
             }
 
-            // 隣接する（くっついている）タピオカへエネルギーを伝播
             let neighbors = graph[body.plugin.id] || [];
             neighbors.forEach(neighbor => {
-                // 自分が「元々マイナス」だった場合、隣のやつをひっくり返すエネルギー（連鎖）が発生する
                 let nextFlip = (currentSign === '－');
                 dfs(neighbor, nextFlip);
             });
         }
 
-        // すべてのタピオカから探索を開始
         list.forEach(item => {
             if (!visited.has(item.body.plugin.id)) {
                 dfs(item.body, false);
             }
         });
 
-        // 実際に符号を更新して画面に反映
         if (flippedIds.size > 0) {
             playSound(587.33, 'sine', 0.08); 
             list.forEach(item => {
@@ -429,7 +419,6 @@ function handleCollisions(event) {
                 }
             });
             
-            // 連鎖演出が落ち着いた頃にクリアチェック
             setTimeout(checkClear, 300);
         }
     }
