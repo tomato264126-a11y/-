@@ -101,7 +101,7 @@
     <h1>タピオカパズル</h1>
     <div class="rule-summary">
         赤い線をこえるまでに「＋（水色）」をたくさん作ろう！<br>
-        「－」に直接触れたタピオカは、同時に何個でも一緒に反転するよ！
+        落としたタピオカがぶつかった“その瞬間”だけ、触れた仲間が一斉に反転するよ！
     </div>
 
     <div id="game-container">
@@ -267,7 +267,8 @@ function createTapioca(x, y, sign, isStatic = false) {
     label.innerText = sign;
     container.appendChild(label);
     
-    body.plugin = { sign: sign, id: Math.random() };
+    // isDropping: 最初から底にあるやつはfalse、落とすやつはtrueにする
+    body.plugin = { sign: sign, id: Math.random(), isDropping: false };
     Composite.add(engine.world, body);
     
     const item = { body, label };
@@ -312,7 +313,9 @@ function dropCurrent() {
     if (!currentBody || !gameActive) return;
     initAudio();
     
+    // 落とした瞬間に「落下フラグ（isDropping）」をONにしてリストに追加
     Body.setStatic(currentBody, false);
+    currentBody.plugin.isDropping = true;
     list.push({ body: currentBody, label: currentLabel });
     
     if (currentBody.plugin.sign === '＋') {
@@ -346,31 +349,38 @@ function updateLabels() {
     });
 }
 
-// 【同時衝突対応版】接触した全てのタピオカをフラットに反転させるロジック
+// 【主役限定ロジック】落としたタピオカが激突した最初の瞬間だけを計算する
 function handleCollisions(event) {
     if (!gameActive) return;
     
-    // このフレーム内で「反転させるべきタピオカのID」を管理するオブジェクト
     let targetFlips = {};
+    let activeDroppers = new Set();
 
     event.pairs.forEach(pair => {
         const bodyA = pair.bodyA;
         const bodyB = pair.bodyB;
         
-        // 両方がタピオカである場合
         if (bodyA.plugin && bodyB.plugin) {
-            let signA = bodyA.plugin.sign;
-            let signB = bodyB.plugin.sign;
-            
-            // どちらか一方でもマイナスが含まれる衝突なら、お互いに反転フラグを立てる
-            if (signA === '－' || signB === '－') {
-                targetFlips[bodyA.plugin.id] = (targetFlips[bodyA.plugin.id] || bodyA.plugin.sign) === '＋' ? '－' : '＋';
-                targetFlips[bodyB.plugin.id] = (targetFlips[bodyB.plugin.id] || bodyB.plugin.sign) === '＋' ? '－' : '＋';
+            // どちらか一方が「今まさに上から落ちてきたタピオカ」である場合のみ処理！
+            if (bodyA.plugin.isDropping || bodyB.plugin.isDropping) {
+                
+                let signA = bodyA.plugin.sign;
+                let signB = bodyB.plugin.sign;
+                
+                // どちらかにマイナスが含まれる場合、お互いの反転ターゲットをセット
+                if (signA === '－' || signB === '－') {
+                    targetFlips[bodyA.plugin.id] = (targetFlips[bodyA.plugin.id] || bodyA.plugin.sign) === '＋' ? '－' : '＋';
+                    targetFlips[bodyB.plugin.id] = (targetFlips[bodyB.plugin.id] || bodyB.plugin.sign) === '＋' ? '－' : '＋';
+                }
+                
+                // 衝突した落下タピオカを記録
+                if (bodyA.plugin.isDropping) activeDroppers.add(bodyA);
+                if (bodyB.plugin.isDropping) activeDroppers.add(bodyB);
             }
         }
     });
     
-    // 集計された反転対象を一斉に適用
+    // 反転をまとめて適用
     let updated = false;
     Object.keys(targetFlips).forEach(id => {
         const item = list.find(t => t.body.plugin.id == id);
@@ -383,7 +393,6 @@ function handleCollisions(event) {
                 item.label.className = `tapioca-label ${newSign === '＋' ? 'plus' : 'minus'}`;
                 item.label.innerText = newSign;
                 
-                // スコアのリアルタイム増減
                 if (oldSign === '－' && newSign === '＋') {
                     score += 10;
                 } else if (oldSign === '＋' && newSign === '－') {
@@ -392,6 +401,11 @@ function handleCollisions(event) {
                 updated = true;
             }
         }
+    });
+
+    // 【重要】最初の激突が終わったので、このフレームで衝突した落下の主役たちのフラグを速攻で解除！
+    activeDroppers.forEach(body => {
+        body.plugin.isDropping = false;
     });
 
     if (updated) {
