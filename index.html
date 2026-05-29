@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>正負の数タピオカゲーム</title>
+    <title>タピオカゲーム</title>
     <style>
         body {
             font-family: 'Helvetica Neue', Arial, sans-serif;
@@ -37,6 +37,16 @@
             border-radius: 0 0 30px 30px;
             background-color: rgba(255,255,255,0.6);
         }
+        /* ゲームオーバーのライン（コップの淵） */
+        #dead-line {
+            position: absolute;
+            bottom: 340px;
+            left: 50px;
+            width: 260px;
+            height: 2px;
+            background-color: rgba(255, 0, 0, 0.4);
+            border-dash: 4px;
+        }
         .tapioca {
             position: absolute;
             width: 40px;
@@ -49,10 +59,9 @@
             font-size: 18px;
             color: white;
             box-shadow: 0 4px 6px rgba(0,0,0,0.15);
-            transition: background-color 0.3s, transform 0.1s;
         }
-        .plus { background-color: #4fc3f7; } /* 水色 */
-        .minus { background-color: #ff8a80; } /* ピンク */
+        .plus { background-color: #4fc3f7; }
+        .minus { background-color: #ff8a80; }
         
         #ui-layer {
             margin-top: 15px;
@@ -60,11 +69,12 @@
             font-weight: bold;
         }
         #timer { color: #2c3e50; }
-        #result-modal {
+        
+        .modal {
             display: none;
             position: absolute;
             top: 0; left: 0; width: 100%; height: 100%;
-            background-color: rgba(0,0,0,0.7);
+            background-color: rgba(0,0,0,0.8);
             color: white;
             justify-content: center;
             align-items: center;
@@ -72,6 +82,8 @@
             border-radius: 20px;
             z-index: 10;
         }
+        #gameover-modal { background-color: rgba(139, 0, 0, 0.85); }
+        
         button {
             margin-top: 15px;
             padding: 10px 20px;
@@ -84,34 +96,50 @@
             cursor: pointer;
         }
         button:hover { background-color: #45a049; }
+        #sound-btn {
+            background-color: #78909c;
+            margin-top: 5px;
+            font-size: 14px;
+            padding: 5px 10px;
+        }
     </style>
 </head>
 <body>
 
-    <h1>タピオカ正負の数計算ゲーム</h1>
+    <h1>タピオカゲーム</h1>
     <div class="rule-summary">
         全部のタピオカを「＋（水色）」にしよう！<br>
-        マイナスにマイナスをぶつけるとプラスになるよ！
+        マイナス同士をぶつけるとプラスに大反転！
     </div>
 
     <div id="game-container">
         <div id="cup"></div>
-        <div id="result-modal">
-            <h2>🎉 クリア！</h2>
+        <div id="dead-line"></div>
+        
+        <div id="clear-modal" class="modal">
+            <h2>🎉 CLEAR !!</h2>
             <p id="final-time"></p>
             <button onclick="resetGame()">もう一度遊ぶ</button>
+        </div>
+
+        <div id="gameover-modal" class="modal">
+            <h2>⚠️ GAME OVER</h2>
+            <p>コップから溢れてしまった！</p>
+            <button onclick="resetGame()">リトライ</button>
         </div>
     </div>
 
     <div id="ui-layer">
-        タイム: <span id="timer">0.0</span> 秒
+        タイム: <span id="timer">0.0</span> 秒<br>
+        <button id="sound-btn" onclick="toggleMute()">🎵 BGM: ON</button>
     </div>
 
 <script>
 const container = document.getElementById('game-container');
 const cup = document.getElementById('cup');
 const timerEl = document.getElementById('timer');
-const modal = document.getElementById('result-modal');
+const clearModal = document.getElementById('clear-modal');
+const gameoverModal = document.getElementById('gameover-modal');
 const finalTimeEl = document.getElementById('final-time');
 
 let cupTapis = [];
@@ -121,29 +149,73 @@ let startTime = null;
 let timerInterval = null;
 let gameActive = false;
 
+// サウンド設定
+let audioCtx = null;
+let isMuted = false;
+let bgmInterval = null;
+
 // ルール設定
 const TAPI_SIZE = 40;
 const CUP_LEFT = 50 + 8;
 const CUP_RIGHT = 50 + 260 - 8 - TAPI_SIZE;
 const CUP_BOTTOM = 500 - 20 - 8 - TAPI_SIZE;
-const CUP_TOP = 500 - 20 - 320;
+const CUP_DEADLINE = 500 - 340; // 溢れ判定のY座標
 
-// ゲーム初期化
+function initAudio() {
+    if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        startBGM();
+    }
+}
+
+// サウンド生成関数
+function playSound(freq, type, duration) {
+    if (isMuted || !audioCtx) return;
+    try {
+        let osc = audioCtx.createOscillator();
+        let gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+    } catch(e) {}
+}
+
+// かわいいピコピコBGMをループ再生
+function startBGM() {
+    if (bgmInterval) clearInterval(bgmInterval);
+    let notes = [261.63, 293.66, 329.63, 349.23, 392.00, 349.23, 329.63, 293.66]; // ドレミファソファミレ
+    let step = 0;
+    bgmInterval = setInterval(() => {
+        if (gameActive && !isMuted) {
+            playSound(notes[step % notes.length], 'triangle', 0.2);
+            step++;
+        }
+    }, 400);
+}
+
+function toggleMute() {
+    isMuted = !isMuted;
+    document.getElementById('sound-btn').innerText = isMuted ? "🔇 BGM: OFF" : "🎵 BGM: ON";
+    initAudio();
+}
+
 function initGame() {
     cup.innerHTML = '';
     cupTapis = [];
-    modal.style.display = 'none';
+    clearModal.style.display = 'none';
+    gameoverModal.style.display = 'none';
     
-    // コップの中にランダムに初期タピオカを配置（6個）
-    for(let i=0; i<6; i++) {
+    // コップの中に初期タピオカを配置（4個、少し優しめに）
+    for(let i=0; i<4; i++) {
         let sign = Math.random() > 0.5 ? '＋' : '－';
-        let x = CUP_LEFT + Math.random() * (CUP_RIGHT - CUP_LEFT);
-        let y = CUP_BOTTOM - Math.floor(i / 2) * (TAPI_SIZE + 5);
-        
-        // 重なりを適当に回避
-        if(i % 2 === 1) x = CUP_RIGHT - Math.random()*20;
-        else x = CUP_LEFT + Math.random()*20;
-
+        let x = CUP_LEFT + (i * 55) + Math.random()*10;
+        if (x > CUP_RIGHT) x = CUP_RIGHT;
+        let y = CUP_BOTTOM;
         createCupTapioca(x, y, sign);
     }
     
@@ -165,32 +237,29 @@ function createCupTapioca(x, y, sign) {
     cupTapis.push({ el, x, y, sign });
 }
 
-// 次の降らせるタピオカを生成
 function spawnNextTapioca() {
     if (!gameActive) return;
     
-    const sign = Math.random() > 0.4 ? '－' : '＋'; // マイナスを少し多めに
+    const sign = Math.random() > 0.4 ? '－' : '＋';
     currentTapi = document.createElement('div');
     currentTapi.className = `tapioca ${sign === '＋' ? 'plus' : 'minus'}`;
     currentTapi.innerText = sign;
     
-    // 初期位置（中央上部）
     let x = 160;
     let y = 40;
     currentTapi.style.left = `${x}px`;
     currentTapi.style.top = `${y}px`;
     container.appendChild(currentTapi);
     
-    // ドラッグ＆ドロップイベント（マウス・スマホ両対応）
     currentTapi.addEventListener('mousedown', startDrag);
     currentTapi.addEventListener('touchstart', startDrag, {passive: false});
 }
 
 function startDrag(e) {
     if(!gameActive) return;
+    initAudio(); // ユーザーのアクションでオーディオを起動
     isDragging = true;
     moveDrag(e);
-    
     window.addEventListener('mousemove', moveDrag);
     window.addEventListener('touchmove', moveDrag, {passive: false});
     window.addEventListener('mouseup', endDrag);
@@ -203,95 +272,124 @@ function moveDrag(e) {
     let clientX = e.clientX || (e.touches && e.touches[0].clientX);
     let rect = container.getBoundingClientRect();
     let x = clientX - rect.left - TAPI_SIZE/2;
-    
-    // 移動範囲制限
     if(x < CUP_LEFT) x = CUP_LEFT;
     if(x > CUP_RIGHT) x = CUP_RIGHT;
-    
     currentTapi.style.left = `${x}px`;
 }
 
 function endDrag() {
     if(!isDragging) return;
     isDragging = false;
-    
     window.removeEventListener('mousemove', moveDrag);
     window.removeEventListener('touchmove', moveDrag);
     window.removeEventListener('mouseup', endDrag);
     window.removeEventListener('touchend', endDrag);
     
+    playSound(440, 'square', 0.05); // ポトッという音
     dropTapioca();
 }
 
-// 垂直落下と衝突判定
+// 落下と転がりの処理
 function dropTapioca() {
     let x = parseFloat(currentTapi.style.left);
     let y = parseFloat(currentTapi.style.top);
     
     let dropInterval = setInterval(() => {
-        y += 8; // 落下の速さ
+        y += 10; // 落下速度
         currentTapi.style.top = `${y}px`;
         
-        // コップの中のタピオカとの衝突判定
-        let hitTapis = [];
+        let hitTapi = null;
+        // 衝突判定
         for(let tapi of cupTapis) {
-            let dist = Math.hypot((x + TAPI_SIZE/2) - (tapi.x + TAPI_SIZE/2), (y + TAPI_SIZE/2) - (tapi.y + TAPI_SIZE/2));
-            if(dist < TAPI_SIZE) { // 接触した
-                hitTapis.push(tapi);
+            let dist = Math.hypot((x - tapi.x), (y - tapi.y));
+            if(dist < TAPI_SIZE - 2) {
+                hitTapi = tapi;
+                break;
             }
         }
         
-        // 底に着いたか、他のタピオカに触れた場合
-        if(y >= CUP_BOTTOM || hitTapis.length > 0) {
+        // 底に着いたか、他のタピオカにぶつかったら停止して転がり判定へ
+        if(y >= CUP_BOTTOM || hitTapi) {
             clearInterval(dropInterval);
             
-            // 着地位置の調整（簡易的にスタック）
-            if(hitTapis.length > 0) {
-                y = Math.min(...hitTapis.map(t => t.y)) - TAPI_SIZE + 5;
-                currentTapi.style.top = `${y}px`;
-            } else {
+            if (y >= CUP_BOTTOM) {
                 y = CUP_BOTTOM;
                 currentTapi.style.top = `${y}px`;
-            }
-            
-            let mySign = currentTapi.innerText;
-            
-            // ご提示いただいたルールに基づく符号変化の計算
-            if(hitTapis.length > 0) {
-                // 接触した全てのタピオカの元の符号の掛け算をシミュレート
-                // マイナスの個数をカウント
-                let minusCount = (mySign === '－' ? 1 : 0);
-                hitTapis.forEach(t => { if(t.sign === '－') minusCount++; });
+                landTapioca(x, y);
+            } else {
+                // コロコロ転がる処理（ぶつかった相手の左右どちらにずれているか）
+                let diffX = x - hitTapi.x;
+                let rollX = diffX > 0 ? 15 : -15; // 左右にずらす
                 
-                // 新しい符号の決定（マイナスが奇数個ならマイナス、偶数個ならプラス）
-                let newSign = (minusCount % 2 === 1) ? '－' : '＋';
+                // コップの壁を突き抜けないように制限
+                let nextX = x + rollX;
+                if(nextX < CUP_LEFT) nextX = CUP_LEFT;
+                if(nextX > CUP_RIGHT) nextX = CUP_RIGHT;
                 
-                // 自分と、接触した相手すべての符号を変える
-                mySign = newSign;
-                updateSign(currentTapi, newSign);
-                hitTapis.forEach(t => {
-                    t.sign = newSign;
-                    updateSign(t.el, newSign);
-                });
+                x = nextX;
+                y = hitTapi.y - TAPI_SIZE + 8; // 少しめり込みつつ上に乗せる
+                currentTapi.style.left = `${x}px`;
+                currentTapi.style.top = `${y}px`;
+                
+                // 転がった先でさらに下がないか再確認し、着地
+                landTapioca(x, y);
             }
-            
-            // コップの仲間入り
-            cupTapis.push({ el: currentTapi, x, y, sign: mySign });
-            currentTapi = null;
-            
-            checkClear();
-            if(gameActive) spawnNextTapioca();
         }
-    }, 10);
+    }, 12);
+}
+
+// 着地後の処理（符号反転、クリア・ゲームオーバー判定）
+function landTapioca(x, y) {
+    let mySign = currentTapi.innerText;
+    let hitTapis = [];
+    
+    // 周囲にあるタピオカを探す
+    for(let tapi of cupTapis) {
+        let dist = Math.hypot((x - tapi.x), (y - tapi.y));
+        if(dist < TAPI_SIZE + 10) {
+            hitTapis.push(tapi);
+        }
+    }
+    
+    if(hitTapis.length > 0) {
+        let minusCount = (mySign === '－' ? 1 : 0);
+        hitTapis.forEach(t => { if(t.sign === '－') minusCount++; });
+        let newSign = (minusCount % 2 === 1) ? '－' : '＋';
+        
+        // 符号が実際に変わったかチェックして効果音を変える
+        let changed = (mySign !== newSign) || hitTapis.some(t => t.sign !== newSign);
+        
+        mySign = newSign;
+        updateSign(currentTapi, newSign);
+        hitTapis.forEach(t => {
+            t.sign = newSign;
+            updateSign(t.el, newSign);
+        });
+        
+        if (changed) {
+            playSound(600, 'sine', 0.15); // ピキーン（反転音）
+            // 連鎖感を出すためのアニメーション
+            currentTapi.style.transform = "scale(1.2)";
+            setTimeout(() => currentTapi.style.transform = "scale(1)", 150);
+        }
+    }
+    
+    cupTapis.push({ el: currentTapi, x, y, sign: mySign });
+    currentTapi = null;
+    
+    // ゲームオーバー判定（デッドラインを超えたか）
+    if (y < CUP_DEADLINE) {
+        gameOver();
+        return;
+    }
+    
+    checkClear();
+    if(gameActive) spawnNextTapioca();
 }
 
 function updateSign(element, sign) {
     element.innerText = sign;
-    if(sign === '＋') {
-        element.className = 'tapioca plus';
-    } else {
-        element.className = 'tapioca minus';
-    }
+    element.className = `tapioca ${sign === '＋' ? 'plus' : 'minus'}`;
 }
 
 function updateTimer() {
@@ -300,18 +398,25 @@ function updateTimer() {
 }
 
 function checkClear() {
-    // 全てが「＋」になっているかチェック
     const allPlus = cupTapis.every(t => t.sign === '＋');
     if(allPlus && cupTapis.length > 0) {
         gameActive = false;
         clearInterval(timerInterval);
-        modal.style.display = 'flex';
+        playSound(880, 'sine', 0.1);
+        setTimeout(() => playSound(1318.51, 'sine', 0.3), 100); // ファンファーレ音
+        clearModal.style.display = 'flex';
         finalTimeEl.innerText = `タイム: ${timerEl.innerText} 秒`;
     }
 }
 
+function gameOver() {
+    gameActive = false;
+    clearInterval(timerInterval);
+    playSound(150, 'sawtooth', 0.5); // ブーという音
+    gameoverModal.style.display = 'flex';
+}
+
 function resetGame() {
-    // 古いタピオカを全削除
     const tapis = document.querySelectorAll('.tapioca');
     tapis.forEach(t => t.remove());
     initGame();
