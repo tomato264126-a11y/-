@@ -99,7 +99,7 @@
     <h1>タピオカゲーム</h1>
     <div class="rule-summary">
         全部のタピオカを「＋（水色）」にしよう！<br>
-        「－」がぶつかったり、押されて新しく触れると符号がひっくり返るよ！
+        「－」が新しくぶつかったり、勢いよく押されて動いた時に符号が反転するよ！
     </div>
 
     <div id="game-container">
@@ -122,7 +122,7 @@
     </div>
 
 <script>
-const { Engine, Render, Runner, Bodies, Composite, Body, Events, Pair } = Matter;
+const { Engine, Render, Runner, Bodies, Composite, Body, Events } = Matter;
 
 const container = document.getElementById('game-container');
 const timerEl = document.getElementById('timer');
@@ -143,7 +143,7 @@ let audioCtx = null;
 let isMuted = false;
 let bgmInterval = null;
 
-// 定数（サイズと位置を徹底チューニング）
+// 定数
 const WIDTH = 360;
 const HEIGHT = 540;
 const TAPI_RADIUS = 40; 
@@ -153,9 +153,6 @@ const CUP_W = 280;
 const CUP_H = 340;
 const WALL_THICK = 12;
 const DEADLINE_Y = HEIGHT - CUP_H + 20; 
-
-// 接触中のペアを記憶して無限ループを防ぐセット
-let activeContacts = new Set();
 
 function initAudio() {
     if (!audioCtx) {
@@ -209,7 +206,6 @@ function initGame() {
     list = [];
     currentBody = null;
     currentLabel = null;
-    activeContacts.clear();
 
     engine = Engine.create({ gravity: { y: 1.4 } });
     render = Render.create({
@@ -221,20 +217,23 @@ function initGame() {
     runner = Runner.create();
     Runner.run(runner, engine);
 
-    // コップ
+    // コップの壁
     const leftWall = Bodies.rectangle(CUP_X - CUP_W/2, CUP_Y - CUP_H/2, WALL_THICK, CUP_H, { isStatic: true, render: { fillStyle: '#cfd8dc' } });
     const rightWall = Bodies.rectangle(CUP_X + CUP_W/2, CUP_Y - CUP_H/2, WALL_THICK, CUP_H, { isStatic: true, render: { fillStyle: '#cfd8dc' } });
     const bottomWall = Bodies.rectangle(CUP_X, CUP_Y, CUP_W + WALL_THICK, WALL_THICK, { isStatic: true, render: { fillStyle: '#cfd8dc' } });
     Composite.add(engine.world, [leftWall, rightWall, bottomWall]);
 
-    // 初期タピオカ
+    // 【修正】初期タピオカが絶対に爆発ワープしないよう、広めの底に安全配置
+    const spawnPositions = [
+        { x: CUP_X - 75, y: CUP_Y - TAPI_RADIUS - 10 },
+        { x: CUP_X,      y: CUP_Y - TAPI_RADIUS - 10 },
+        { x: CUP_X + 75, y: CUP_Y - TAPI_RADIUS - 10 }
+    ];
+
     for (let i = 0; i < 3; i++) {
         let sign = Math.random() > 0.65 ? '－' : '＋';
         if(i === 1 && !list.some(item => item.body.plugin.sign === '－')) sign = '－';
-        
-        let rx = CUP_X - 60 + (i * 60);
-        let ry = CUP_Y - 50;
-        createTapioca(rx, ry, sign, false);
+        createTapioca(spawnPositions[i].x, spawnPositions[i].y, sign, false);
     }
 
     Events.on(render, 'afterRender', () => {
@@ -249,9 +248,9 @@ function initGame() {
         ctx.setLineDash([]);
     });
 
-    // 物理エンジンの衝突処理
+    // 衝突イベント（StartとActive両方で監視）
     Events.on(engine, 'collisionStart', handleCollisions);
-    Events.on(engine, 'collisionEnd', handleCollisionEnd);
+    Events.on(engine, 'collisionActive', handleCollisions);
     Events.on(engine, 'afterUpdate', updateLabels);
 
     gameActive = true;
@@ -273,7 +272,7 @@ function createTapioca(x, y, sign, isStatic = false) {
     const body = Bodies.circle(x, y, TAPI_RADIUS, {
         isStatic: isStatic,
         restitution: 0.1,
-        friction: 0.01,
+        friction: 0.02,
         render: { visible: false }
     });
     
@@ -282,25 +281,26 @@ function createTapioca(x, y, sign, isStatic = false) {
     label.innerText = sign;
     container.appendChild(label);
     
-    body.plugin = { sign: sign, hasLanded: !isStatic, id: Math.random() };
+    // coolDownを導入して瞬間的な連続変化を防ぐ
+    body.plugin = { sign: sign, hasLanded: !isStatic, id: Math.random(), coolDown: 0 };
     Composite.add(engine.world, body);
     
     const item = { body, label };
     if (!isStatic) list.push(item);
+    
+    label.style.left = `${x}px`;
+    label.style.top = `${y}px`;
+    
     return item;
 }
 
 function spawnNext() {
     if (!gameActive) return;
     const sign = Math.random() > 0.45 ? '－' : '＋';
-    // 出現位置を「完全に画面の真ん中 (WIDTH / 2)」に固定！壁のめり込みを防ぐ
+    // 【修正】次の弾の初期配置を完全にコップ中央の上空に固定。
     const next = createTapioca(WIDTH / 2, 50, sign, true);
     currentBody = next.body;
     currentLabel = next.label;
-    
-    // ラベルの位置も初期化
-    currentLabel.style.left = `${WIDTH / 2}px`;
-    currentLabel.style.top = `50px`;
 }
 
 function moveCurrent(clientX) {
@@ -308,7 +308,6 @@ function moveCurrent(clientX) {
     let rect = container.getBoundingClientRect();
     let x = clientX - rect.left;
     
-    // 2倍サイズがコップの壁を突き抜けないようにガードレールを設定
     const minX = CUP_X - CUP_W/2 + TAPI_RADIUS + WALL_THICK/2;
     const maxX = CUP_X + CUP_W/2 - TAPI_RADIUS - WALL_THICK/2;
     if (x < minX) x = minX;
@@ -350,10 +349,11 @@ function updateLabels() {
         item.label.style.left = `${item.body.position.x}px`;
         item.label.style.top = `${item.body.position.y}px`;
         item.label.style.transform = `translate(-50%, -50%) rotate(${item.body.angle}rad)`;
+        if (item.body.plugin.coolDown > 0) item.body.plugin.coolDown--;
     });
 }
 
-// チカチカを防ぐ新・衝突システム
+// 【超改良】速度と衝撃で判定するチカチカ・フリーズ完全撃退システム
 function handleCollisions(event) {
     if (!gameActive) return;
     
@@ -362,54 +362,40 @@ function handleCollisions(event) {
         const bodyB = pair.bodyB;
         
         if (bodyA.plugin && bodyB.plugin && bodyA.plugin.hasLanded && bodyB.plugin.hasLanded) {
-            // ペア固有のID文字列を作成 (例: "0.123_0.456")
-            const pairId = bodyA.plugin.id < bodyB.plugin.id  
-                ? `${bodyA.plugin.id}_${bodyB.plugin.id}` 
-                : `${bodyB.plugin.id}_${bodyA.plugin.id}`;
-            
-            // すでに接触中として処理済みのペアならチカチカさせない（スルーする）
-            if (activeContacts.has(pairId)) return;
-            
-            // 新しい接触として記憶
-            activeContacts.add(pairId);
+            if (bodyA.plugin.coolDown > 0 || bodyB.plugin.coolDown > 0) return;
 
-            let changed = false;
-
-            // 片方がマイナスだった場合、もう片方をひっくり返す
-            if (bodyA.plugin.sign === '－') {
-                bodyB.plugin.sign = (bodyB.plugin.sign === '＋') ? '－' : '＋';
-                changed = true;
-            }
-            else if (bodyB.plugin.sign === '－') {
-                bodyA.plugin.sign = (bodyA.plugin.sign === '＋') ? '－' : '＋';
-                changed = true;
-            }
+            // お互いの移動速度（ベクトルの大きさ）を計算
+            const speedA = Math.sqrt(bodyA.velocity.x ** 2 + bodyA.velocity.y ** 2);
+            const speedB = Math.sqrt(bodyB.velocity.x ** 2 + bodyB.velocity.y ** 2);
             
-            if (changed) {
-                playSound(587.33, 'sine', 0.08); 
+            // 【重要】どちらかが「動いている（衝撃がある）」ときだけ符号処理を行う！
+            // 静止している時はスルーするのでチカチカもフリーズもしません。
+            if (speedA > 0.2 || speedB > 0.2) {
+                let changed = false;
+
+                if (bodyA.plugin.sign === '－') {
+                    bodyB.plugin.sign = (bodyB.plugin.sign === '＋') ? '－' : '＋';
+                    changed = true;
+                }
+                else if (bodyB.plugin.sign === '－') {
+                    bodyA.plugin.sign = (bodyA.plugin.sign === '＋') ? '－' : '＋';
+                    changed = true;
+                }
                 
-                list.forEach(item => {
-                    if (item.body.plugin.id === bodyA.plugin.id || item.body.plugin.id === bodyB.plugin.id) {
-                        item.label.className = `tapioca-label ${item.body.plugin.sign === '＋' ? 'plus' : 'minus'}`;
-                        item.label.innerText = item.body.plugin.sign;
-                    }
-                });
-                checkClear();
+                if (changed) {
+                    bodyA.plugin.coolDown = 12; // 連続変化防止タイマー（約0.15秒）
+                    bodyB.plugin.coolDown = 12;
+                    playSound(587.33, 'sine', 0.08); 
+                    
+                    list.forEach(item => {
+                        if (item.body.plugin.id === bodyA.plugin.id || item.body.plugin.id === bodyB.plugin.id) {
+                            item.label.className = `tapioca-label ${item.body.plugin.sign === '＋' ? 'plus' : 'minus'}`;
+                            item.label.innerText = item.body.plugin.sign;
+                        }
+                    });
+                    checkClear();
+                }
             }
-        }
-    });
-}
-
-// タピオカ同士が離れたら、再び変化できるようにロックを解除する
-function handleCollisionEnd(event) {
-    event.pairs.forEach(pair => {
-        const bodyA = pair.bodyA;
-        const bodyB = pair.bodyB;
-        if (bodyA.plugin && bodyB.plugin) {
-            const pairId = bodyA.plugin.id < bodyB.plugin.id  
-                ? `${bodyA.plugin.id}_${bodyB.plugin.id}` 
-                : `${bodyB.plugin.id}_${bodyA.plugin.id}`;
-            activeContacts.delete(pairId); // 離れたので記憶から消去
         }
     });
 }
