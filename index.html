@@ -15,7 +15,7 @@
             user-select: none;
         }
         h1 { color: #333; margin-bottom: 5px; font-size: 24px; }
-        .rule-summary { font-size: 14px; color: #555; margin-bottom: 15px; }
+        .rule-summary { font-size: 14px; color: #555; margin-bottom: 15px; line-height: 1.4; }
         #game-container {
             position: relative;
             width: 360px;
@@ -32,17 +32,16 @@
             top: 0; left: 0; width: 100%; height: 100%;
             z-index: 1;
         }
-        /* HTMLで描画する綺麗なタピオカの見た目 */
         .tapioca-label {
             position: absolute;
-            width: 80px; /* サイズ2倍（直径80） */
+            width: 80px; 
             height: 80px;
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
             font-weight: bold;
-            font-size: 36px; /* 文字も大きく */
+            font-size: 36px; 
             color: white;
             box-shadow: 0 4px 6px rgba(0,0,0,0.15);
             pointer-events: none;
@@ -100,7 +99,8 @@
     <h1>タピオカゲーム</h1>
     <div class="rule-summary">
         全部のタピオカを「＋（水色）」にしよう！<br>
-        マイナスを偶数個巻き込むとプラスに大反転するよ！
+        <strong>「－」をぶつけると、相手の符号がひっくり返るよ！</strong><br>
+        （マイナス × マイナス ＝ プラスの大反転を狙おう！）
     </div>
 
     <div id="game-container">
@@ -134,7 +134,7 @@ const finalTimeEl = document.getElementById('final-time');
 let engine, render, runner;
 let currentBody = null;
 let currentLabel = null;
-let list = []; // タピオカのペア（bodyとDOMラベル）を管理
+let list = []; 
 let gameActive = false;
 let startTime = null;
 let timerInterval = null;
@@ -144,16 +144,16 @@ let audioCtx = null;
 let isMuted = false;
 let bgmInterval = null;
 
-// 定数（サイズ2倍調整）
+// 定数
 const WIDTH = 360;
 const HEIGHT = 540;
-const TAPI_RADIUS = 40; // 直径80（2倍サイズ！）
+const TAPI_RADIUS = 40; 
 const CUP_X = WIDTH / 2;
 const CUP_Y = HEIGHT - 15;
 const CUP_W = 280;
 const CUP_H = 340;
 const WALL_THICK = 12;
-const DEADLINE_Y = HEIGHT - CUP_H + 20; // 溢れ判定ライン
+const DEADLINE_Y = HEIGHT - CUP_H + 20; 
 
 function initAudio() {
     if (!audioCtx) {
@@ -197,7 +197,6 @@ function toggleMute() {
 }
 
 function initGame() {
-    // リセット処理
     const oldCanvas = container.querySelector('canvas');
     if (oldCanvas) oldCanvas.remove();
     document.querySelectorAll('.tapioca-label').forEach(el => el.remove());
@@ -218,21 +217,23 @@ function initGame() {
     runner = Runner.create();
     Runner.run(runner, engine);
 
-    // コップの壁作成
+    // コップの壁
     const leftWall = Bodies.rectangle(CUP_X - CUP_W/2, CUP_Y - CUP_H/2, WALL_THICK, CUP_H, { isStatic: true, render: { fillStyle: '#cfd8dc' } });
     const rightWall = Bodies.rectangle(CUP_X + CUP_W/2, CUP_Y - CUP_H/2, WALL_THICK, CUP_H, { isStatic: true, render: { fillStyle: '#cfd8dc' } });
     const bottomWall = Bodies.rectangle(CUP_X, CUP_Y, CUP_W + WALL_THICK, WALL_THICK, { isStatic: true, render: { fillStyle: '#cfd8dc' } });
     Composite.add(engine.world, [leftWall, rightWall, bottomWall]);
 
-    // 初期タピオカ（3個にして2倍サイズでも余裕を持たせる）
+    // 初期タピオカ（マイナスを少し出にくく調整して3個配置）
     for (let i = 0; i < 3; i++) {
-        let sign = Math.random() > 0.5 ? '＋' : '－';
-        let rx = CUP_X - 50 + (i * 50);
+        let sign = Math.random() > 0.65 ? '－' : '＋';
+        // 最低1個はマイナスを入れるおまけ
+        if(i === 1 && !list.some(item => item.body.plugin.sign === '－')) sign = '－';
+        
+        let rx = CUP_X - 60 + (i * 60);
         let ry = CUP_Y - 50;
         createTapioca(rx, ry, sign, false);
     }
 
-    // 赤いデッドラインの描画
     Events.on(render, 'afterRender', () => {
         const ctx = render.context;
         ctx.strokeStyle = 'rgba(255, 0, 0, 0.4)';
@@ -245,10 +246,8 @@ function initGame() {
         ctx.setLineDash([]);
     });
 
-    // 衝突イベント（ここを「衝突した瞬間のみ」に修正！）
+    // 衝突イベント
     Events.on(engine, 'collisionStart', handleCollisions);
-
-    // 毎フレームHTMLラベルの位置を物理体に同期させる
     Events.on(engine, 'afterUpdate', updateLabels);
 
     gameActive = true;
@@ -258,7 +257,6 @@ function initGame() {
 
     spawnNext();
 
-    // イベント登録
     container.addEventListener('touchstart', handleTouch, {passive: false});
     container.addEventListener('touchmove', handleTouch, {passive: false});
     container.addEventListener('touchend', handleTouchEnd, {passive: false});
@@ -270,12 +268,11 @@ function initGame() {
 function createTapioca(x, y, sign, isStatic = false) {
     const body = Bodies.circle(x, y, TAPI_RADIUS, {
         isStatic: isStatic,
-        restitution: 0.1,
+        restitution: 0.15,
         friction: 0.02,
-        render: { visible: false } // 物理エンジン側の丸は非表示にする
+        render: { visible: false }
     });
     
-    // HTML側で文字入りの丸を作る
     const label = document.createElement('div');
     label.className = `tapioca-label ${sign === '＋' ? 'plus' : 'minus'}`;
     label.innerText = sign;
@@ -287,7 +284,6 @@ function createTapioca(x, y, sign, isStatic = false) {
     const item = { body, label };
     if (!isStatic) list.push(item);
     
-    // 初期位置同期
     label.style.left = `${x}px`;
     label.style.top = `${y}px`;
     
@@ -296,7 +292,8 @@ function createTapioca(x, y, sign, isStatic = false) {
 
 function spawnNext() {
     if (!gameActive) return;
-    const sign = Math.random() > 0.4 ? '－' : '＋';
+    // 落ちてくる弾は、マイナスが出やすいようにして戦略性をアップ
+    const sign = Math.random() > 0.45 ? '－' : '＋';
     const next = createTapioca(WIDTH / 2, 50, sign, true);
     currentBody = next.body;
     currentLabel = next.label;
@@ -347,12 +344,11 @@ function updateLabels() {
     list.forEach(item => {
         item.label.style.left = `${item.body.position.x}px`;
         item.label.style.top = `${item.body.position.y}px`;
-        // 回転も同期させて転がり感を出す
         item.label.style.transform = `translate(-50%, -50%) rotate(${item.body.angle}rad)`;
     });
 }
 
-// 衝突した「その瞬間」だけ符号変化を計算する（暴走防止）
+// 新・衝突判定ルール（片方が「－」なら、ぶつかった相手の符号をひっくり返す！）
 function handleCollisions(event) {
     if (!gameActive) return;
     
@@ -361,29 +357,29 @@ function handleCollisions(event) {
         const bodyB = pair.bodyB;
         
         if (bodyA.plugin && bodyB.plugin && bodyA.plugin.hasLanded && bodyB.plugin.hasLanded) {
-            let minusCount = 0;
-            if (bodyA.plugin.sign === '－') minusCount++;
-            if (bodyB.plugin.sign === '－') minusCount++;
+            let changed = false;
+
+            // bodyA が「－」だった場合、bodyB の符号を反転させる
+            if (bodyA.plugin.sign === '－') {
+                bodyB.plugin.sign = (bodyB.plugin.sign === '＋') ? '－' : '＋';
+                changed = true;
+            }
+            // bodyB が「－」だった場合、bodyA の符号を反転させる
+            else if (bodyB.plugin.sign === '－') {
+                bodyA.plugin.sign = (bodyA.plugin.sign === '＋') ? '－' : '＋';
+                changed = true;
+            }
             
-            if (minusCount > 0) {
-                // マイナスが2個（偶数）ならプラス、1個（奇数）ならマイナス
-                let newSign = (minusCount % 2 === 0) ? '＋' : '－';
-                
-                let changed = false;
-                if (bodyA.plugin.sign !== newSign) { bodyA.plugin.sign = newSign; changed = true; }
-                if (bodyB.plugin.sign !== newSign) { bodyB.plugin.sign = newSign; changed = true; }
-                
-                if (changed) {
-                    playSound(600, 'sine', 0.1);
-                    // 見た目の更新
-                    list.forEach(item => {
-                        if (item.body.plugin.id === bodyA.plugin.id || item.body.plugin.id === bodyB.plugin.id) {
-                            item.label.className = `tapioca-label ${item.body.plugin.sign === '＋' ? 'plus' : 'minus'}`;
-                            item.label.innerText = item.body.plugin.sign;
-                        }
-                    });
-                    checkClear();
-                }
+            if (changed) {
+                playSound(600, 'sine', 0.1);
+                // ラベルの見た目を一括更新
+                list.forEach(item => {
+                    if (item.body.plugin.id === bodyA.plugin.id || item.body.plugin.id === bodyB.plugin.id) {
+                        item.label.className = `tapioca-label ${item.body.plugin.sign === '＋' ? 'plus' : 'minus'}`;
+                        item.label.innerText = item.body.plugin.sign;
+                    }
+                });
+                checkClear();
             }
         }
     });
