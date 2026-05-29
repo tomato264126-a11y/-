@@ -101,7 +101,7 @@
     <h1>タピオカパズル</h1>
     <div class="rule-summary">
         赤い線をこえるまでに「＋（水色）」をたくさん作ろう！<br>
-        「－」が直接ごつんと触れあったタピオカ同士だけが反転するよ！
+        「－」に直接触れたタピオカは、同時に何個でも一緒に反転するよ！
     </div>
 
     <div id="game-container">
@@ -240,7 +240,6 @@ function initGame() {
         ctx.setLineDash([]);
     });
 
-    // 衝突の「瞬間」だけをシンプルに捉える
     Events.on(engine, 'collisionStart', handleCollisions);
     Events.on(engine, 'afterUpdate', updateLabels);
 
@@ -274,7 +273,6 @@ function createTapioca(x, y, sign, isStatic = false) {
     const item = { body, label };
     if (!isStatic) {
         list.push(item);
-        // 最初から「＋」が生成された場合も加点
         if (sign === '＋') {
             score += 10;
             scoreEl.innerText = score;
@@ -314,7 +312,6 @@ function dropCurrent() {
     if (!currentBody || !gameActive) return;
     initAudio();
     
-    // 落とした瞬間、すぐリストに加えて衝突時にお互いが判定されるようにする
     Body.setStatic(currentBody, false);
     list.push({ body: currentBody, label: currentLabel });
     
@@ -349,68 +346,61 @@ function updateLabels() {
     });
 }
 
-// 【究極洗練】直接ごつんと当たったペア「だけ」を双方変化させるシステム
+// 【同時衝突対応版】接触した全てのタピオカをフラットに反転させるロジック
 function handleCollisions(event) {
     if (!gameActive) return;
     
-    let changedIds = new Set();
-    
+    // このフレーム内で「反転させるべきタピオカのID」を管理するオブジェクト
+    let targetFlips = {};
+
     event.pairs.forEach(pair => {
         const bodyA = pair.bodyA;
         const bodyB = pair.bodyB;
         
-        // タピオカ同士の直接の衝突である場合のみ
+        // 両方がタピオカである場合
         if (bodyA.plugin && bodyB.plugin) {
             let signA = bodyA.plugin.sign;
             let signB = bodyB.plugin.sign;
             
-            // どちらか一方にマイナスが含まれている場合、お互いの符号を掛け合わせる(双方反転)
+            // どちらか一方でもマイナスが含まれる衝突なら、お互いに反転フラグを立てる
             if (signA === '－' || signB === '－') {
-                // すでに今回のフレームで処理済みのペアでなければ処理
-                if (!changedIds.has(bodyA.plugin.id) && !changedIds.has(bodyB.plugin.id)) {
-                    
-                    // 新しい符号の決定（マイナスをかける＝符号反転）
-                    bodyA.plugin.nextSign = (signA === '＋') ? '－' : '＋';
-                    bodyB.plugin.nextSign = (signB === '＋') ? '－' : '＋';
-                    
-                    changedIds.add(bodyA.plugin.id);
-                    changedIds.add(bodyB.plugin.id);
-                }
+                targetFlips[bodyA.plugin.id] = (targetFlips[bodyA.plugin.id] || bodyA.plugin.sign) === '＋' ? '－' : '＋';
+                targetFlips[bodyB.plugin.id] = (targetFlips[bodyB.plugin.id] || bodyB.plugin.sign) === '＋' ? '－' : '＋';
             }
         }
     });
     
-    // 実際に直接当たったペアだけをパチッとひっくり返す
-    if (changedIds.size > 0) {
-        playSound(587.33, 'sine', 0.08); 
-        
-        list.forEach(item => {
-            if (item.body.plugin.nextSign) {
-                let oldSign = item.body.plugin.sign;
-                let newSign = item.body.plugin.nextSign;
-                
+    // 集計された反転対象を一斉に適用
+    let updated = false;
+    Object.keys(targetFlips).forEach(id => {
+        const item = list.find(t => t.body.plugin.id == id);
+        if (item) {
+            let oldSign = item.body.plugin.sign;
+            let newSign = targetFlips[id];
+            
+            if (oldSign !== newSign) {
                 item.body.plugin.sign = newSign;
                 item.label.className = `tapioca-label ${newSign === '＋' ? 'plus' : 'minus'}`;
                 item.label.innerText = newSign;
-                delete item.body.plugin.nextSign;
                 
-                // マイナスから新しく「＋」に変わった瞬間にボーナス10点加算！
+                // スコアのリアルタイム増減
                 if (oldSign === '－' && newSign === '＋') {
                     score += 10;
-                }
-                // もしプラスからマイナスにデバフを喰らってしまったら-10点
-                else if (oldSign === '＋' && newSign === '－') {
+                } else if (oldSign === '＋' && newSign === '－') {
                     score = Math.max(0, score - 10);
                 }
+                updated = true;
             }
-        });
-        
+        }
+    });
+
+    if (updated) {
+        playSound(587.33, 'sine', 0.08); 
         scoreEl.innerText = score;
     }
 }
 
 function checkGameOver() {
-    // 動きがほぼ止まっているタピオカが、赤い線（DEADLINE_Y）より上にいたらアウト
     let overflow = list.some(item => item.body.position.y < DEADLINE_Y && item.body.velocity.y < 0.1);
     if (overflow) {
         gameActive = false;
