@@ -25,7 +25,6 @@
             border-radius: 20px;
             box-shadow: 0 10px 25px rgba(0,0,0,0.1);
             overflow: hidden;
-            touch-action: none;
         }
         canvas {
             position: absolute;
@@ -69,11 +68,11 @@
             margin-top: 15px;
             font-size: 20px;
             font-weight: bold;
-            display: none; /* ゲーム開始前は非表示 */
+            display: none;
         }
         #score { color: #e91e63; font-size: 24px; }
         
-        /* モーダル・画面レイヤー共通 */
+        /* モーダル表示 */
         .modal {
             position: absolute;
             top: 0; left: 0; width: 100%; height: 100%;
@@ -86,9 +85,9 @@
             z-index: 10;
             box-sizing: border-box;
         }
-        #gameover-modal { display: none; background-color: rgba(44, 62, 80, 0.9); }
+        #gameover-modal { display: none; background-color: rgba(44, 62, 80, 0.95); }
         
-        /* スタート画面用スタイル */
+        /* スタート画面 */
         #start-screen {
             background-color: #ffffff;
             color: #2c3e50;
@@ -113,7 +112,10 @@
         .rule-title { font-size: 13px; font-weight: bold; color: #e91e63; margin-bottom: 6px; border-bottom: 1px dashed #ccc; padding-bottom: 3px; }
         .formula-line { font-size: 15px; font-weight: bold; margin: 5px 0; display: flex; align-items: center; color: #333; }
         
+        /* ボタン共通（z-indexを上げてタッチを最優先に） */
         button {
+            position: relative;
+            z-index: 20;
             padding: 12px 30px;
             font-size: 18px;
             font-weight: bold;
@@ -124,6 +126,7 @@
             cursor: pointer;
             box-shadow: 0 4px 6px rgba(0,0,0,0.2);
             transition: transform 0.1s, background-color 0.2s;
+            touch-action: auto; /* ボタン単体はタッチ操作をブラウザに許可 */
         }
         button:hover { background-color: #c2185b; transform: scale(1.03); }
         .sub-btn {
@@ -147,7 +150,7 @@
             
             <div class="guide-text">
                 <strong>【操作方法】</strong><br>
-                画面をスライドして狙いを定め、指を離すとタピオカが落下します。赤い線をこえて溢れるまでにたくさんのプラス（＋）を作ろう！
+                画面をスライドして狙いを定めて、指を離すとタピオカが落下するよ。赤い線をこえて溢れるまでにたくさんのプラス（＋）を作ろう！
             </div>
 
             <div class="rule-box">
@@ -165,21 +168,21 @@
                 <div class="formula-line"><span class="tapi-inline minus">－</span> × <span class="tapi-inline minus">－</span> × <span class="tapi-inline minus">－</span> ＝ <span class="tapi-inline minus">－</span></div>
             </div>
 
-            <button onclick="startGameFromStartScreen()">ゲームを始める 🚀</button>
+            <button type="button" onclick="startGameFromStartScreen(event)">ゲームを始める 🚀</button>
         </div>
 
         <div id="gameover-modal" class="modal">
             <h2>📊 GAME OVER</h2>
             <p>コップからタピオカが溢れました！</p>
             <p style="font-size: 24px; font-weight: bold; color: #ffeb3b;" id="final-score"></p>
-            <button onclick="resetGame()">もう一度挑戦する</button>
+            <button type="button" onclick="resetGame(event)">もう一度挑戦する</button>
         </div>
     </div>
 
     <div id="ui-layer">
         現在のスコア: <span id="score">0</span> 点<br>
         <button class="sub-btn" id="sound-btn" onclick="toggleMute()">🎵 BGM: ON</button>
-        <button class="sub-btn" id="reset-btn" onclick="resetGame()">🔄 スコアをリセット</button>
+        <button class="sub-btn" id="reset-btn" onclick="resetGame(event)">🔄 スコアをリセット</button>
     </div>
 
 <script>
@@ -255,14 +258,15 @@ function toggleMute() {
     initAudio();
 }
 
-function startGameFromStartScreen() {
+function startGameFromStartScreen(e) {
+    if(e) { e.stopPropagation(); e.preventDefault(); }
     startScreen.style.display = 'none';
     uiLayer.style.display = 'block';
     initGame();
 }
 
 function initGame() {
-    // 🌟【重要修正】古い状態の破棄を完璧に行う
+    // 古い物理ループを確実に終了
     if (runner) Runner.stop(runner);
     if (render) {
         Render.stop(render);
@@ -280,7 +284,7 @@ function initGame() {
     score = 0;
     scoreEl.innerText = score;
 
-    // 新規にエンジンとレンダラーを作成
+    // まっさらにエンジンとレンダラーを作成
     engine = Engine.create({ gravity: { y: 1.4 } });
     render = Render.create({
         element: container,
@@ -326,20 +330,14 @@ function initGame() {
     gameActive = true;
     spawnNext();
 
-    // イベントの多重登録を防ぐためクリーンアップしてから設定
-    container.ontouchstart = null;
-    container.ontouchmove = null;
-    container.ontouchend = null;
-    container.onmousedown = null;
-    container.onmousemove = null;
-    container.onmouseup = null;
-
-    container.addEventListener('touchstart', handleTouch, {passive: false});
-    container.addEventListener('touchmove', handleTouch, {passive: false});
-    container.addEventListener('touchend', handleTouchEnd, {passive: false});
-    container.addEventListener('mousedown', handleMouse);
-    container.addEventListener('mousemove', handleMouse);
-    container.addEventListener('mouseup', handleMouseUp);
+    // 🌟【超重要】操作の登録先をコンテナ全体ではなく、生成された「canvas（ゲーム画面自体）」に限定する
+    const canvas = render.canvas;
+    canvas.addEventListener('touchstart', handleTouch, {passive: false});
+    canvas.addEventListener('touchmove', handleTouch, {passive: false});
+    canvas.addEventListener('touchend', handleTouchEnd, {passive: false});
+    canvas.addEventListener('mousedown', handleMouse);
+    canvas.addEventListener('mousemove', handleMouse);
+    canvas.addEventListener('mouseup', handleMouseUp);
 }
 
 function createTapioca(x, y, sign, isStatic = false) {
@@ -422,10 +420,10 @@ function dropCurrent() {
 }
 
 let isMouseDown = false;
-function handleMouse(e) { e.preventDefault(); if(e.type==='mousedown') isMouseDown = true; if(isMouseDown) moveCurrent(e.clientX); }
+function handleMouse(e) { if(!gameActive) return; e.preventDefault(); if(e.type==='mousedown') isMouseDown = true; if(isMouseDown) moveCurrent(e.clientX); }
 function handleMouseUp() { if(isMouseDown) { isMouseDown = false; dropCurrent(); } }
-function handleTouch(e) { e.preventDefault(); moveCurrent(e.touches[0].clientX); }
-function handleTouchEnd(e) { e.preventDefault(); dropCurrent(); }
+function handleTouch(e) { if(!gameActive) return; e.preventDefault(); moveCurrent(e.touches[0].clientX); }
+function handleTouchEnd(e) { if(!gameActive) return; e.preventDefault(); dropCurrent(); }
 
 function updateLabels() {
     list.forEach(item => {
@@ -513,7 +511,8 @@ function checkGameOver() {
     }
 }
 
-function resetGame() {
+function resetGame(e) {
+    if(e) { e.stopPropagation(); e.preventDefault(); }
     initGame();
 }
 </script>
