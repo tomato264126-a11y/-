@@ -88,13 +88,13 @@
         }
         #gameover-modal { display: none; background-color: rgba(44, 62, 80, 0.9); }
         
-        /* 🌟 スタート画面用スタイル */
+        /* スタート画面用スタイル */
         #start-screen {
             background-color: #ffffff;
             color: #2c3e50;
             padding: 20px;
             overflow-y: auto;
-            justify-content: flex-start; /* 上詰めでスクロール可能に */
+            justify-content: flex-start;
         }
         #start-screen h2 { color: #333; margin-top: 10px; margin-bottom: 10px; font-size: 22px; }
         .guide-text { font-size: 13px; color: #555; line-height: 1.4; margin-bottom: 15px; text-align: left; padding: 0 10px; }
@@ -143,22 +143,22 @@
 
     <div id="game-container">
         <div id="start-screen" class="modal">
-            <h2>🧋タピオカパズル（正負の数の乗法）</h2>
+            <h2>🧋 正負の数パズル</h2>
             
             <div class="guide-text">
                 <strong>【操作方法】</strong><br>
-                画面をスライドして狙いを定め、指を離すとタピオカが落下します。赤い線をこえて溢れるまでにたくさんのプラス（＋）を作ろう！
+                画面をスライドして狙いを定め、指を離すとタピオカが落下します。赤い線をこえて溢れるまでに、たくさんのプラス（＋）を作ろう！
             </div>
 
             <div class="rule-box">
-                <div class="rule-title">🔵 2つのタピオカがぶつかる時</div>
+                <div class="rule-title">🍒 2つのタピオカがぶつかる時</div>
                 <div class="formula-line"><span class="tapi-inline plus">＋</span> × <span class="tapi-inline plus">＋</span> ＝ <span class="tapi-inline plus">＋</span></div>
                 <div class="formula-line"><span class="tapi-inline minus">－</span> × <span class="tapi-inline minus">－</span> ＝ <span class="tapi-inline plus">＋</span></div>
                 <div class="formula-line"><span class="tapi-inline plus">＋</span> × <span class="tapi-inline minus">－</span> ＝ <span class="tapi-inline minus">－</span></div>
             </div>
 
             <div class="rule-box">
-                <div class="rule-title">🔴 3つのタピオカが一斉にぶつかる時</div>
+                <div class="rule-title">🫐 3つのタピオカが一斉にぶつかる時</div>
                 <div class="formula-line"><span class="tapi-inline plus">＋</span> × <span class="tapi-inline plus">＋</span> × <span class="tapi-inline plus">＋</span> ＝ <span class="tapi-inline plus">＋</span></div>
                 <div class="formula-line"><span class="tapi-inline plus">＋</span> × <span class="tapi-inline minus">－</span> × <span class="tapi-inline minus">－</span> ＝ <span class="tapi-inline plus">＋</span></div>
                 <div class="formula-line"><span class="tapi-inline plus">＋</span> × <span class="tapi-inline plus">＋</span> × <span class="tapi-inline minus">－</span> ＝ <span class="tapi-inline minus">－</span></div>
@@ -255,7 +255,7 @@ function toggleMute() {
     initAudio();
 }
 
-// 🌟 スタートボタンを押した時の処理
+// スタートボタンを押した時の処理
 function startGameFromStartScreen() {
     startScreen.style.display = 'none';
     uiLayer.style.display = 'block';
@@ -268,6 +268,7 @@ function initGame() {
     document.querySelectorAll('.tapioca-label').forEach(el => el.remove());
     
     gameoverModal.style.display = 'none';
+    startScreen.style.display = 'none'; // 確実に非表示にする
     list = [];
     currentBody = null;
     currentLabel = null;
@@ -317,6 +318,14 @@ function initGame() {
 
     gameActive = true;
     spawnNext();
+
+    // イベントリスナーを重複登録しないよう、一度削除してから追加
+    container.removeEventListener('touchstart', handleTouch);
+    container.removeEventListener('touchmove', handleTouch);
+    container.removeEventListener('touchend', handleTouchEnd);
+    container.removeEventListener('mousedown', handleMouse);
+    container.removeEventListener('mousemove', handleMouse);
+    container.removeEventListener('mouseup', handleMouseUp);
 
     container.addEventListener('touchstart', handleTouch, {passive: false});
     container.addEventListener('touchmove', handleTouch, {passive: false});
