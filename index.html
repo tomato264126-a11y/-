@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>タピオカパズル</title>
+    <title>正負の数タピオカパズル</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <style>
         body {
@@ -15,7 +15,7 @@
             user-select: none;
         }
         h1 { color: #333; margin-bottom: 5px; font-size: 24px; }
-        .rule-summary { font-size: 14px; color: #2c3e50; margin-bottom: 15px; line-height: 1.5; font-weight: bold; }
+        
         #game-container {
             position: relative;
             width: 360px;
@@ -32,22 +32,35 @@
             top: 0; left: 0; width: 100%; height: 100%;
             z-index: 1;
         }
+        
+        /* タピオカの見た目 */
+        .tapioca-label, .tapi-inline {
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: white;
+        }
         .tapioca-label {
             position: absolute;
             width: 80px; 
             height: 80px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
             font-size: 36px; 
-            color: white;
             box-shadow: 0 4px 6px rgba(0,0,0,0.15);
             pointer-events: none;
             z-index: 2;
             transform: translate(-50%, -50%);
             transition: background-color 0.1s, transform 0.05s;
+        }
+        /* インライン用（ルール説明用ミニタピオカ） */
+        .tapi-inline {
+            width: 24px;
+            height: 24px;
+            font-size: 13px;
+            vertical-align: middle;
+            margin: 0 2px;
+            box-shadow: 0 2px 3px rgba(0,0,0,0.1);
         }
         .plus { background-color: #4fc3f7; }
         .minus { background-color: #ff8a80; }
@@ -56,42 +69,70 @@
             margin-top: 15px;
             font-size: 20px;
             font-weight: bold;
+            display: none; /* ゲーム開始前は非表示 */
         }
         #score { color: #e91e63; font-size: 24px; }
         
+        /* モーダル・画面レイヤー共通 */
         .modal {
-            display: none;
             position: absolute;
             top: 0; left: 0; width: 100%; height: 100%;
-            background-color: rgba(0,0,0,0.8);
             color: white;
+            display: flex;
             justify-content: center;
             align-items: center;
             flex-direction: column;
             border-radius: 20px;
             z-index: 10;
+            box-sizing: border-box;
         }
-        #gameover-modal { background-color: rgba(44, 62, 80, 0.9); }
+        #gameover-modal { display: none; background-color: rgba(44, 62, 80, 0.9); }
+        
+        /* 🌟 スタート画面用スタイル */
+        #start-screen {
+            background-color: #ffffff;
+            color: #2c3e50;
+            padding: 20px;
+            overflow-y: auto;
+            justify-content: flex-start; /* 上詰めでスクロール可能に */
+        }
+        #start-screen h2 { color: #333; margin-top: 10px; margin-bottom: 10px; font-size: 22px; }
+        .guide-text { font-size: 13px; color: #555; line-height: 1.4; margin-bottom: 15px; text-align: left; padding: 0 10px; }
+        
+        /* ルール数式エリア */
+        .rule-box {
+            background-color: #f7f9fa;
+            border: 2px solid #e0e6ed;
+            border-radius: 12px;
+            padding: 12px;
+            width: 90%;
+            margin-bottom: 15px;
+            text-align: left;
+            box-sizing: border-box;
+        }
+        .rule-title { font-size: 13px; font-weight: bold; color: #e91e63; margin-bottom: 6px; border-bottom: 1px dashed #ccc; padding-bottom: 3px; }
+        .formula-line { font-size: 15px; font-weight: bold; margin: 5px 0; display: flex; align-items: center; color: #333; }
         
         button {
-            margin-top: 15px;
-            padding: 10px 25px;
-            font-size: 16px;
+            padding: 12px 30px;
+            font-size: 18px;
             font-weight: bold;
             border: none;
-            border-radius: 5px;
+            border-radius: 25px;
             background-color: #e91e63;
             color: white;
             cursor: pointer;
             box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            transition: transform 0.1s, background-color 0.2s;
         }
-        button:hover { background-color: #c2185b; }
+        button:hover { background-color: #c2185b; transform: scale(1.03); }
         .sub-btn {
             background-color: #78909c;
             font-size: 14px;
             padding: 6px 12px;
             margin: 5px;
             box-shadow: none;
+            border-radius: 5px;
         }
         #reset-btn { background-color: #ff9800; }
     </style>
@@ -99,12 +140,34 @@
 <body>
 
     <h1>タピオカパズル</h1>
-    <div class="rule-summary">
-        赤い線をこえるまでに「＋（水色）」をたくさん作ろう！<br>
-        ぶつかったタピオカ全体の「－」が奇数個なら全てマイナス、偶数個なら全てプラスに！
-    </div>
 
     <div id="game-container">
+        <div id="start-screen" class="modal">
+            <h2>🧋タピオカパズル（正負の数の乗法）</h2>
+            
+            <div class="guide-text">
+                <strong>【操作方法】</strong><br>
+                画面をスライドして狙いを定め、指を離すとタピオカが落下します。赤い線をこえて溢れたらゲームオーバー！
+            </div>
+
+            <div class="rule-box">
+                <div class="rule-title">🔵 2つのタピオカがぶつかる時</div>
+                <div class="formula-line"><span class="tapi-inline plus">＋</span> × <span class="tapi-inline plus">＋</span> ＝ <span class="tapi-inline plus">＋</span></div>
+                <div class="formula-line"><span class="tapi-inline minus">－</span> × <span class="tapi-inline minus">－</span> ＝ <span class="tapi-inline plus">＋</span></div>
+                <div class="formula-line"><span class="tapi-inline plus">＋</span> × <span class="tapi-inline minus">－</span> ＝ <span class="tapi-inline minus">－</span></div>
+            </div>
+
+            <div class="rule-box">
+                <div class="rule-title">🔴 3つのタピオカが一斉にぶつかる時</div>
+                <div class="formula-line"><span class="tapi-inline plus">＋</span> × <span class="tapi-inline plus">＋</span> × <span class="tapi-inline plus">＋</span> ＝ <span class="tapi-inline plus">＋</span></div>
+                <div class="formula-line"><span class="tapi-inline plus">＋</span> × <span class="tapi-inline minus">－</span> × <span class="tapi-inline minus">－</span> ＝ <span class="tapi-inline plus">＋</span></div>
+                <div class="formula-line"><span class="tapi-inline plus">＋</span> × <span class="tapi-inline plus">＋</span> × <span class="tapi-inline minus">－</span> ＝ <span class="tapi-inline minus">－</span></div>
+                <div class="formula-line"><span class="tapi-inline minus">－</span> × <span class="tapi-inline minus">－</span> × <span class="tapi-inline minus">－</span> ＝ <span class="tapi-inline minus">－</span></div>
+            </div>
+
+            <button onclick="startGameFromStartScreen()">ゲームを始める 🚀</button>
+        </div>
+
         <div id="gameover-modal" class="modal">
             <h2>📊 GAME OVER</h2>
             <p>コップからタピオカが溢れました！</p>
@@ -125,6 +188,8 @@ const { Engine, Render, Runner, Bodies, Composite, Body, Events } = Matter;
 const container = document.getElementById('game-container');
 const scoreEl = document.getElementById('score');
 const gameoverModal = document.getElementById('gameover-modal');
+const startScreen = document.getElementById('start-screen');
+const uiLayer = document.getElementById('ui-layer');
 const finalScoreEl = document.getElementById('final-score');
 
 let engine, render, runner;
@@ -188,6 +253,13 @@ function toggleMute() {
     isMuted = !isMuted;
     document.getElementById('sound-btn').innerText = isMuted ? "🔇 BGM: OFF" : "🎵 BGM: ON";
     initAudio();
+}
+
+// 🌟 スタートボタンを押した時の処理
+function startGameFromStartScreen() {
+    startScreen.style.display = 'none';
+    uiLayer.style.display = 'block';
+    initGame();
 }
 
 function initGame() {
@@ -347,14 +419,12 @@ function updateLabels() {
     });
 }
 
-// 【バグ完全修正】時間差をなくし、最初の状態をスナップショットして一斉に掛け算判定する
 function handleCollisions(event) {
     if (!gameActive) return;
     
     let involvedBodies = new Set();
     let hasDropper = false;
 
-    // 1. このフレームで落下タピオカと衝突した全オブジェクトを抽出
     event.pairs.forEach(pair => {
         const bodyA = pair.bodyA;
         const bodyB = pair.bodyB;
@@ -370,7 +440,6 @@ function handleCollisions(event) {
     
     if (!hasDropper || involvedBodies.size === 0) return;
 
-    // 🌟【最重要修正】激突したその瞬間の符号状態を最初に完全固定（スナップショット）する
     let snapshot = [];
     let minusCount = 0;
     
@@ -382,14 +451,12 @@ function handleCollisions(event) {
         }
     });
 
-    // 2. 固定された最初の状態から、掛け算の結果（奇数個なら「－」、偶数個なら「＋」）を決定
     let newSign = (minusCount % 2 === 1) ? '－' : '＋';
 
-    // 3. 全員同時に、決定した新しい符号へと一斉に書き換える
     let updated = false;
     snapshot.forEach(itemData => {
         const targetBody = itemData.body;
-        const oldSign = itemData.initialSign; // 変化前の最初の符号を使うので、入れ替わりバグは起きない
+        const oldSign = itemData.initialSign;
         
         if (oldSign !== newSign) {
             const item = list.find(t => t.body.plugin.id === targetBody.plugin.id);
@@ -398,7 +465,6 @@ function handleCollisions(event) {
                 item.label.className = `tapioca-label ${newSign === '＋' ? 'plus' : 'minus'}`;
                 item.label.innerText = newSign;
                 
-                // スコア計算
                 if (oldSign === '－' && newSign === '＋') {
                     score += 10;
                 } else if (oldSign === '＋' && newSign === '－') {
@@ -409,7 +475,6 @@ function handleCollisions(event) {
         }
     });
 
-    // 4. 全員分の落下フラグを安全に解除
     involvedBodies.forEach(body => {
         if (body.plugin.isDropping) {
             body.plugin.isDropping = false;
@@ -439,8 +504,6 @@ function resetGame() {
     }
     initGame();
 }
-
-initGame();
 </script>
 
 </body>
