@@ -147,7 +147,7 @@
             
             <div class="guide-text">
                 <strong>【操作方法】</strong><br>
-                画面をスライドして狙いを定め、指を離すとタピオカが落下します。赤い線をこえて溢れるまでに、たくさんのプラス（＋）を作ろう！
+                画面をスライドして狙いを定め、指を離すとタピオカが落下します。赤い線をこえて溢れるまでにたくさんのプラス（＋）を作ろう！
             </div>
 
             <div class="rule-box">
@@ -255,7 +255,6 @@ function toggleMute() {
     initAudio();
 }
 
-// スタートボタンを押した時の処理
 function startGameFromStartScreen() {
     startScreen.style.display = 'none';
     uiLayer.style.display = 'block';
@@ -263,18 +262,25 @@ function startGameFromStartScreen() {
 }
 
 function initGame() {
-    const oldCanvas = container.querySelector('canvas');
-    if (oldCanvas) oldCanvas.remove();
+    // 🌟【重要修正】古い状態の破棄を完璧に行う
+    if (runner) Runner.stop(runner);
+    if (render) {
+        Render.stop(render);
+        if (render.canvas) render.canvas.remove();
+    }
+    if (engine) Engine.clear(engine);
+
     document.querySelectorAll('.tapioca-label').forEach(el => el.remove());
     
     gameoverModal.style.display = 'none';
-    startScreen.style.display = 'none'; // 確実に非表示にする
+    startScreen.style.display = 'none'; 
     list = [];
     currentBody = null;
     currentLabel = null;
     score = 0;
     scoreEl.innerText = score;
 
+    // 新規にエンジンとレンダラーを作成
     engine = Engine.create({ gravity: { y: 1.4 } });
     render = Render.create({
         element: container,
@@ -303,6 +309,7 @@ function initGame() {
 
     Events.on(render, 'afterRender', () => {
         const ctx = render.context;
+        if (!ctx) return;
         ctx.strokeStyle = 'rgba(255, 0, 0, 0.6)';
         ctx.lineWidth = 3;
         ctx.setLineDash([5, 5]);
@@ -319,13 +326,13 @@ function initGame() {
     gameActive = true;
     spawnNext();
 
-    // イベントリスナーを重複登録しないよう、一度削除してから追加
-    container.removeEventListener('touchstart', handleTouch);
-    container.removeEventListener('touchmove', handleTouch);
-    container.removeEventListener('touchend', handleTouchEnd);
-    container.removeEventListener('mousedown', handleMouse);
-    container.removeEventListener('mousemove', handleMouse);
-    container.removeEventListener('mouseup', handleMouseUp);
+    // イベントの多重登録を防ぐためクリーンアップしてから設定
+    container.ontouchstart = null;
+    container.ontouchmove = null;
+    container.ontouchend = null;
+    container.onmousedown = null;
+    container.onmousemove = null;
+    container.onmouseup = null;
 
     container.addEventListener('touchstart', handleTouch, {passive: false});
     container.addEventListener('touchmove', handleTouch, {passive: false});
@@ -507,10 +514,6 @@ function checkGameOver() {
 }
 
 function resetGame() {
-    if (engine) {
-        Engine.clear(engine);
-        Runner.stop(runner);
-    }
     initGame();
 }
 </script>
